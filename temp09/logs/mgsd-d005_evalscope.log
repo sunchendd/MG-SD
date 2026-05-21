@@ -1,0 +1,41 @@
+SERVER_PID=845160
+╭──────────────────────────────────────────────────────────────────────────────╮
+│ Performance Test Summary Report                                              │
+╰──────────────────────────────────────────────────────────────────────────────╯
+
+Basic Information:
+┌───────────────────────┬──────────────────────────────────────────────────────┐
+│ Model                 │ Qwen3-32B                                            │
+│ Test Dataset          │ line_by_line                                         │
+│ API Type              │ openai                                               │
+│ Total Generated       │ 5,120.0 tokens                                       │
+│ Avg Output Rate       │ 32.78 tokens/sec                                     │
+│ Total Test Time       │ 156.18 seconds                                       │
+│ Output Path           │ /home/scd/MG-SD/temp09/evalscope/mgsd-d005/Qwen3-32B │
+└───────────────────────┴──────────────────────────────────────────────────────┘
+
+
+                                         Detailed Performance Metrics                                         
+┏━━━━━━┳━━━━━━┳━━━━━┳━━━━━━┳━━━━━━━━━┳━━━━━━━━━┳━━━━━━━━━━┳━━━━━━━━━━┳━━━━━━━━━━┳━━━━━━━━━━┳━━━━━━━━┳━━━━━━━━┓
+┃      ┃      ┃     ┃      ┃     Avg ┃     P99 ┃      Avg ┃      P99 ┃      Avg ┃      P99 ┃   Gen. ┃ Success┃
+┃Conc. ┃ Rate ┃ Num ┃  RPS ┃ Lat.(s) ┃ Lat.(s) ┃ TTFT(ms) ┃ TTFT(ms) ┃ TPOT(ms) ┃ TPOT(ms) ┃ toks/s ┃    Rate┃
+┡━━━━━━╇━━━━━━╇━━━━━╇━━━━━━╇━━━━━━━━━╇━━━━━━━━━╇━━━━━━━━━━╇━━━━━━━━━━╇━━━━━━━━━━╇━━━━━━━━━━╇━━━━━━━━╇━━━━━━━━┩
+│    1 │  INF │  10 │ 0.06 │  15.610 │  17.000 │    135.2 │    171.7 │     30.3 │     33.0 │  32.78 │  100.0%│
+└──────┴──────┴─────┴──────┴─────────┴─────────┴──────────┴──────────┴──────────┴──────────┴────────┴────────┘
+
+
+                                   Request Metrics                                   
+┏━━━━━━┳━━━━━┳━━━━━━━━┳━━━━━━━━┳━━━━━━━━━┳━━━━━━━━━┳━━━━━━━━┳━━━━━━━━━━┳━━━━━━━━━━━━┓
+┃      ┃     ┃ Avg In ┃ P99 In ┃ Avg Out ┃ P99 Out ┃ Decode ┃  Decoded ┃       Spec.┃
+┃Conc. ┃ Num ┃   Toks ┃   Toks ┃    Toks ┃    Toks ┃ toks/s ┃ Tok/Iter ┃ Accept Rate┃
+┡━━━━━━╇━━━━━╇━━━━━━━━╇━━━━━━━━╇━━━━━━━━━╇━━━━━━━━━╇━━━━━━━━╇━━━━━━━━━━╇━━━━━━━━━━━━┩
+│    1 │  10 │  253.5 │  314.0 │   512.0 │   512.0 │  33.03 │     2.30 │       56.5%│
+└──────┴─────┴────────┴────────┴─────────┴─────────┴────────┴──────────┴────────────┘
+
+
+               Best Performance Configuration               
+ Highest RPS         Concurrency 1 (0.06 req/sec)           
+ Lowest Latency      Concurrency 1 (15.610 seconds)         
+
+Performance Recommendations:
+• The system seems not to have reached its performance bottleneck, try higher concurrency

@@ -1,0 +1,313 @@
+**AAAI 2027 论文实验方案报告**
+
+基于 EARS 工程基础的医疗安全感知投机解码最小可行方案
+
+*建议方法名：MG-SD / SafeSpec-Pure；后续增强版：SafeSpec-Clinical*
+
+# **一、执行摘要**
+
+本报告给出一个面向 2026 年 6 月初产出完整实验结果的压缩型实验方案。原则是：充分复用现有 EARS 的 speculative decoding 工程管线，不在短期内重写系统；只对接受函数做最小结构性升级，并把实验场景从通用 OpenQA/GSM8K 转向医疗长文本生成和医学问答。
+
+核心建议是保留旧框架中的 1 - max(P) 作为“速度收益项”，但不再让它单独决定放宽接受阈值；新增 Top-2 margin gate 作为“安全门控项”。工程上只需额外从目标模型 logits 中取 top-2 概率，计算 p1 - p2，并用该 margin 决定是否启用原有 tolerance。
+
+短期主方法建议命名为 MG-SD（Margin-Gated Speculative Decoding）或 SafeSpec-Pure。AAAI 正稿阶段可以进一步扩展 SafeSpec-Clinical，即在 margin gate 外加入轻量 clinical backoff，以防御 overconfident clinical hallucination。
+
+最小可行实验矩阵为：Qwen3-32B 作为 target model，Qwen3-8B 或 Qwen3-4B 作为 draft model；主数据集为 MIMIC-IV-Note 临床长文本生成，补充数据集为 MedQA 医学问答。主指标为 tokens/s、latency、accepted draft length、CEER、Med-CEER、Dose/Number Error、MedQA Accuracy 和 Answer Flip Rate。
+
+| **问题**                                  | **建议决策**                                     | **理由**                                                                                      |
+| ----------------------------------- | -------------------------------------- | --------------------------------------------------------------------------------------- |
+| 是否完全替换1 - max(P)            | 否，保留并加margin gate              | 这样对现有EARS代码改动最小，同时修正 confidence-only 的临床实体安全盲区。             |
+| 6月初是否做完整 SafeSpec-Clinical | 暂不作为主线                         | clinical backoff、词表、NER、人评会显著增加工程量；可作为后续增强。                   |
+| 短期主模型                        | Qwen3-32B target + Qwen3-8B/4B draft | 当前团队已能跑动32B，Qwen3 系列尺寸完整，便于 draft-target gap 消融。                 |
+| 短期主数据                        | MIMIC-IV-Note + MedQA                | 前者验证临床实体安全和长文本加速，后者验证医学推理保持。                              |
+| 最关键机制实验                    | margin distribution + CEER           | 证明临床实体token更容易发生 low-margin collision，并证明 margin gate 能降低实体错误。 |
+
+# **二、论文定位与战略边界**
+
+## **2.1 对外叙事**
+
+新论文不应对外呈现为“EARS 的改进版”，也不建议在主实验中出现旧版 EARS 名称。对外叙事应当是一个独立问题：临床大模型推理中的安全约束加速（safety-constrained acceleration for medical LLM inference）。
+
+标准 speculative decoding 与各类 relaxed acceptance 方案主要优化吞吐和延迟，但医疗文本中的 token 错误并非均匀有害。普通连接词、模板表达、低信息量描述的错误影响较小；药物、剂量、诊断、检查项目、否定词、左右侧等关键实体错误可能改变临床语义。
+
+因此，新论文的核心目标不是“减少随机拒绝”，而是“在保留 speculative decoding 加速收益的同时，降低临床实体幻觉风险”。
+
+## **2.2 与现有 EARS 工程基础的关系**
+
+从工程角度，建议最大限度复用已有 EARS pipeline，包括 target/draft 概率比 R_i、随机阈值 U_i、candidate verification loop、吞吐统计和延迟统计。
+
+从论文角度，不强调“继承 EARS”。旧公开预印本中使用 1 - max(P_t) 构造动态 tolerance，实验主要聚焦通用任务吞吐提升；新稿应转向医疗实体安全、CEER、人评和 margin collision 分析。
+
+短期内的关键是“最小结构性升级”：把 tolerance 从 confidence-only 改为 margin-gated confidence tolerance。
+
+# **三、算法方案：从 Confidence Relaxation 到 Margin-Gated Relaxation**
+
+## **3.1 基础符号与标准接受规则**
+
+设目标模型为 M\_t，草稿模型为 M\_d。草稿模型在当前位置上下文![](file:////Users/sunchendong/Library/Containers/com.kingsoft.wpsoffice.mac/Data/tmp/wps-sunchendong/ksohtml//wps1.jpg)下提出候选 token ![](file:////Users/sunchendong/Library/Containers/com.kingsoft.wpsoffice.mac/Data/tmp/wps-sunchendong/ksohtml//wps2.jpg)，目标模型并行给出该位置的完整概率分布 ![](file:////Users/sunchendong/Library/Containers/com.kingsoft.wpsoffice.mac/Data/tmp/wps-sunchendong/ksohtml//wps3.jpg)。
+
+对第 i 个候选 token，定义 draft-target 概率比：
+
+![](file:////Users/sunchendong/Library/Containers/com.kingsoft.wpsoffice.mac/Data/tmp/wps-sunchendong/ksohtml//wps4.jpg)
+
+其中 ε 是一个很小的正数，用于避免![](file:////Users/sunchendong/Library/Containers/com.kingsoft.wpsoffice.mac/Data/tmp/wps-sunchendong/ksohtml//wps5.jpg) 过小导致数值不稳定。标准 speculative decoding 的接受规则为：
+
+![](file:////Users/sunchendong/Library/Containers/com.kingsoft.wpsoffice.mac/Data/tmp/wps-sunchendong/ksohtml//wps6.jpg)
+
+在本方案中，所有改动都发生在接受阈值一侧；draft/target 模型、候选生成流程和并行验证流程保持不变。
+
+## **3.2 保留 1 - max(P)，但不让它单独决定放宽**
+
+原 confidence relaxation 使用目标模型 top-1 概率 ![](file:////Users/sunchendong/Library/Containers/com.kingsoft.wpsoffice.mac/Data/tmp/wps-sunchendong/ksohtml//wps7.jpg) 表示置信度，并用 ![](file:////Users/sunchendong/Library/Containers/com.kingsoft.wpsoffice.mac/Data/tmp/wps-sunchendong/ksohtml//wps8.jpg) 表示可放宽空间。这个项不应删除，因为它仍然是速度收益来源：当目标模型对当前位置不确定时，适度放宽可以提高 draft token 的接受率。
+
+![](file:////Users/sunchendong/Library/Containers/com.kingsoft.wpsoffice.mac/Data/tmp/wps-sunchendong/ksohtml//wps9.jpg)
+
+但 ![](file:////Users/sunchendong/Library/Containers/com.kingsoft.wpsoffice.mac/Data/tmp/wps-sunchendong/ksohtml//wps10.jpg) 只能表示“不确定”，不能区分普通高熵描述文本与高风险医学实体候选碰撞。因此新方法保留 ![](file:////Users/sunchendong/Library/Containers/com.kingsoft.wpsoffice.mac/Data/tmp/wps-sunchendong/ksohtml//wps11.jpg) 作为速度项，同时新增 Top-2 margin 作为安全门控。定义目标模型的 top-2 概率为：
+
+![](file:////Users/sunchendong/Library/Containers/com.kingsoft.wpsoffice.mac/Data/tmp/wps-sunchendong/ksohtml//wps12.jpg)
+
+其中 ![](file:////Users/sunchendong/Library/Containers/com.kingsoft.wpsoffice.mac/Data/tmp/wps-sunchendong/ksohtml//wps13.jpg) 是 top-2 margin。![](file:////Users/sunchendong/Library/Containers/com.kingsoft.wpsoffice.mac/Data/tmp/wps-sunchendong/ksohtml//wps14.jpg) 越小，说明目标模型在两个候选之间越纠结；在医疗文本中，这类 low-margin 位置更可能对应药物、诊断、剂量、否定词或左右侧等临床敏感 token。
+
+## **3.3 短期主方法：Hard Margin-Gated Tolerance**
+
+为保证 6 月初前快速完成实验，建议主方法先采用 hard gate。它只引入两个超参数 β 和 δ，工程改动最小，且避免 soft gate 额外引入 τ 后产生“调参炼丹”质疑。
+
+![](file:////Users/sunchendong/Library/Containers/com.kingsoft.wpsoffice.mac/Data/tmp/wps-sunchendong/ksohtml//wps15.jpg)
+
+![](file:////Users/sunchendong/Library/Containers/com.kingsoft.wpsoffice.mac/Data/tmp/wps-sunchendong/ksohtml//wps16.jpg)
+
+等价写法为：
+
+![](file:////Users/sunchendong/Library/Containers/com.kingsoft.wpsoffice.mac/Data/tmp/wps-sunchendong/ksohtml//wps17.jpg)
+
+最终接受阈值需要做非负截断：
+
+![](file:////Users/sunchendong/Library/Containers/com.kingsoft.wpsoffice.mac/Data/tmp/wps-sunchendong/ksohtml//wps18.jpg)
+
+![](file:////Users/sunchendong/Library/Containers/com.kingsoft.wpsoffice.mac/Data/tmp/wps-sunchendong/ksohtml//wps19.jpg)
+
+因此，新规则的语义是：高不确定性负责提供加速空间；高 margin 负责确认当前不属于明显候选碰撞位置。只有二者同时成立时，系统才启用 relaxed acceptance。若 ![](file:////Users/sunchendong/Library/Containers/com.kingsoft.wpsoffice.mac/Data/tmp/wps-sunchendong/ksohtml//wps20.jpg)，则 ![](file:////Users/sunchendong/Library/Containers/com.kingsoft.wpsoffice.mac/Data/tmp/wps-sunchendong/ksohtml//wps21.jpg)，接受规则自动退回标准 speculative decoding。
+
+## **3.4 可选方案：Soft Margin Gate**
+
+如果 hard gate 过于保守，导致 tokens/s 明显接近 Standard SD，可改用 soft gate。此时 margin gate 定义为：
+
+![](file:////Users/sunchendong/Library/Containers/com.kingsoft.wpsoffice.mac/Data/tmp/wps-sunchendong/ksohtml//wps22.jpg)
+
+![](file:////Users/sunchendong/Library/Containers/com.kingsoft.wpsoffice.mac/Data/tmp/wps-sunchendong/ksohtml//wps23.jpg)
+
+注意也可以展开为：
+
+![](file:////Users/sunchendong/Library/Containers/com.kingsoft.wpsoffice.mac/Data/tmp/wps-sunchendong/ksohtml//wps24.jpg)
+
+soft gate 的优点是速度损失更小，缺点是多一个 τ，需要额外做敏感性分析。短期实验建议先使用 hard gate；只有在 hard gate 速度损失过大时再补 soft gate。
+
+## **3.5 后续增强：SafeSpec-Clinical / Composite Gate**
+
+Top-2 margin gate 可以防御候选碰撞，但不能完全防御 overconfident clinical hallucination：如果目标模型对错误医学实体本身给出很高 ![](file:////Users/sunchendong/Library/Containers/com.kingsoft.wpsoffice.mac/Data/tmp/wps-sunchendong/ksohtml//wps25.jpg)，且 ![](file:////Users/sunchendong/Library/Containers/com.kingsoft.wpsoffice.mac/Data/tmp/wps-sunchendong/ksohtml//wps26.jpg) 很大，pure margin gate 会误认为该位置安全。
+
+如果 pilot 显示这类高置信实体错误比例较高，再加入轻量 clinical backoff：
+
+![](file:////Users/sunchendong/Library/Containers/com.kingsoft.wpsoffice.mac/Data/tmp/wps-sunchendong/ksohtml//wps27.jpg)
+
+其中 ![](file:////Users/sunchendong/Library/Containers/com.kingsoft.wpsoffice.mac/Data/tmp/wps-sunchendong/ksohtml//wps28.jpg) 建议先采用 hard backoff：
+
+G\_clinical(x\_i, c\_i) \= 0,  if x\_i or local context hits a high-risk clinical pattern;  otherwise 1.
+
+高风险 pattern 可先覆盖数字、剂量单位、给药频率、给药途径、否定词、左右侧、常见药物后缀和小型药物词表。该增强版适合作为投稿前防御 overconfidence 的备选方案，不建议作为 6 月初最小主线。
+
+# **四、6 月初前最小可行实验矩阵**
+
+## **4.1 模型选择**
+
+| **优先级**      | **Target Model**              | **Draft Model**             | **用途**               | **备注**                                                              |
+| ------- | --------------- | -------------- | ---------------- | --------------------------------------------------------------- |
+| P0    | Qwen3-32B     | Qwen3-8B     | 主实验         | 优先使用；同系列tokenizer和架构更利于 speculative decoding。  |
+| P0/P1 | Qwen3-32B     | Qwen3-4B     | draft size补充 | 若8B draft加速不明显，4B draft 更容易体现速度收益与实体风险。 |
+| P1    | Qwen3-32B     | Qwen3-1.7B   | 压力测试       | 仅在主结果不够明显时使用，更小draft更容易产生实体错误。       |
+| P2    | Llama-3.1-70B | Llama-3.1-8B | 跨模型验证     | 6月初前不建议作为必做项。                                     |
+| P2    | 医学专用LLM   | 同族小模型   | 医疗模型泛化   | 放在投稿前增强，不进入短期最小计划。                          |
+
+**模型选择依据：** Qwen3-32B 模型卡显示其为 32.8B 参数 causal LM，原生上下文长度 32,768；Qwen3 系列同时提供 0.6B、1.7B、4B、8B、14B、32B 等 dense 模型尺寸，适合进行 target-draft gap 实验。
+
+## **4.2 数据集选择**
+
+| **优先级**   | **数据集**                      | **任务形式**                                                                                       | **核心用途**                                                                     | **短期建议**                                                   |
+| ---- | ----------------------- | ---------------------------------------------------------------------------------------- | ---------------------------------------------------------------------- | ---------------------------------------------------- |
+| P0 | MIMIC-IV-Note         | Clinical note continuation：给定 discharge summary 前 30%-50%，生成后续 256-512 tokens | 主安全实验：测CEER、Med-CEER、Dose/Number Error、margin distribution | 必须跑。测试集先500-1000条，时间允许扩到 2000 条。 |
+| P0 | MedQA                 | USMLE-style question answering，可输出 short rationale                                 | 医学推理保持：测Accuracy、Answer Flip Rate、tokens/s                 | 必须跑。先1000条，时间允许全量。                   |
+| P1 | MIMIC-CXR或 MIMIC-R3G | 放射报告impression / findings continuation                                             | 验证negation、laterality、abnormality entity 错误                    | 可选；不建议影响主实验进度。                       |
+| P2 | 中文医学QA /病历数据  | 中文医学问答或生成                                                                     | 展示中文泛化                                                         | 投稿前增强项，不进6月初最小计划。                  |
+
+**数据选择依据：** MIMIC-IV-Note 包含去标识化 discharge summaries 和 radiology reports，适合临床长文本生成与实体一致性评估；MedQA 适合作为医学推理问答补充。
+
+# **五、方法对比设置**
+
+| **方法名（论文中）**                      | **公式/机制**                                                                                 | **是否必做**         | **作用**                                                                  |
+| ----------------------- | ---------------------------------------------------------------------------------- | ---------- | ------------------------------------------------------------------- |
+| Target AR             | 目标模型自回归生成                                                               | 可选     | 质量参考和速度下界；如果时间紧可只在小样本报告。                  |
+| Standard SD           | 标准speculative decoding：Accept x\_i if R\_i ≥ U\_i.                  | 必做     | 系统基础基线。                                                    |
+| Confidence-Relaxed SD | Tol\_i \= β · (1 - p\_{1,i})                                          | 必做     | 模拟confidence-only relaxation，证明单看 1 - max(P) 的风险。      |
+| MG-SD / SafeSpec-Pure | Tol\_i \= β · (1 - p\_{1,i}) · 1[p\_{1,i} - p\_{2,i} \> δ] | 必做     | 主方法。                                                          |
+| MG-SD-soft            | Tol\_i \= β · (1 - p\_{1,i}) · σ((m\_i - δ)/τ)                 | 可选     | 若hard gate速度损失大，再补。                                     |
+| SafeSpec-Clinical     | MG-SD +轻量 clinical backoff                                                     | 后续增强 | 防御overconfident hallucination；投稿前视结果决定是否纳入主方法。 |
+
+注意：论文主文中不使用“旧版 EARS”作为方法名称。Confidence-Relaxed SD 可以作为一种自然的 confidence-only baseline，用于说明 1 - max(P) 单独使用的不足。
+
+# **六、评估指标**
+
+## **6.1 系统效率指标**
+
+| **指标**                              | **定义/说明**                           | **用途**                                        |
+| ------------------------------- | ---------------------------- | ----------------------------------------- |
+| Tokens/s                      | 输出token吞吐量            | 主速度指标。                            |
+| Latency                       | 单样本端到端平均延迟       | 部署相关指标。                          |
+| Average Accepted Draft Length | 每轮验证平均接受草稿长度   | 解释加速来源。                          |
+| Acceptance Rate               | 被接受draft token比例      | 辅助分析。                              |
+| Top-2 Overhead                | 额外top2操作带来的时间开销 | 证明margin gate近似 O(1) 且开销可忽略。 |
+
+## **6.2 医疗实体安全指标**
+
+| **指标**                  | **建议定义**                                                                    | **短期优先级**      |
+| ------------------- | --------------------------------------------------------------------- | ------- |
+| CEER              | (substitution + insertion + deletion) / reference clinical entities | P0    |
+| Med-CEER          | 药物实体错误率                                                      | P0    |
+| Dose/Number Error | 剂量、数字、单位、频次、给药途径错误率                              | P0    |
+| Negation Error    | no/not/without/denies等否定语义错误                                 | P1    |
+| OCE               | Overconfident Clinical Entity Error：p1 高但实体错误的比例          | P1/P2 |
+
+短期 CEER 可以先用自动实体抽取和字符串/概念匹配完成。AAAI 正稿阶段建议补 100-200 条双盲人工评估，以防 CEER 被审稿人质疑为自动工具噪声。
+
+## **6.3 医学问答指标**
+
+| **指标**                   | **说明**                                                  |
+| -------------------- | --------------------------------------------------- |
+| Accuracy           | MedQA选项答案准确率。                             |
+| Answer Flip Rate   | 相对Standard SD或 Target AR，答案发生变化的比例。 |
+| Tokens/s / Latency | 推理加速指标。                                    |
+| Rationale Length   | 如果输出rationale，可记录平均解释长度。           |
+
+# **七、接下来具体要跑的实验**
+
+## **实验 A：MIMIC-IV-Note 主实验**
+
+| **项目**             | **设置**                                                                                                         |
+| -------------- | ---------------------------------------------------------------------------------------------------------- |
+| 模型         | Target: Qwen3-32B；Draft: Qwen3-8B，必要时补 Qwen3-4B。                                                  |
+| 任务         | Clinical note continuation：输入 discharge summary 前 30%-50%，生成后续 256-512 tokens。                 |
+| 样本量       | Pilot: 300-500条；主实验: 1000 条起步，时间允许扩到 2000 条。                                            |
+| 方法         | Standard SD、Confidence-Relaxed SD、MG-SD/SafeSpec-Pure；Target AR 可小样本报告。                        |
+| 指标         | Tokens/s、Latency、Accepted Length、CEER、Med-CEER、Dose/Number Error。                                  |
+| 主要结论目标 | MG-SD相比 Confidence-Relaxed SD 明显降低 CEER，同时保留大部分速度收益；相比 Standard SD 有明确吞吐提升。 |
+
+## **实验 B：Margin Hypothesis 验证**
+
+| **项目**         | **设置**                                                                                           |
+| ---------- | -------------------------------------------------------------------------------------------- |
+| 输入     | MIMIC-IV-Note pilot或主实验样本。                                                          |
+| 记录     | 每个验证位置的p1、p2、m = p1 - p2、token 类型、是否为 clinical entity。                    |
+| 分组     | entity token vs non-entity token；medication token；dose/number token；negation token。    |
+| 输出图   | margin distribution histogram/violin plot；low-margin ratio by token type。                |
+| 判断标准 | 若clinical entity token的 low-margin 比例显著高于 non-entity token，MG-SD 的机制假设成立。 |
+
+## **实验 C：MedQA 医学推理保持实验**
+
+| **项目**             | **设置**                                                                          |
+| -------------- | --------------------------------------------------------------------------- |
+| 模型         | 与实验A相同，优先 Qwen3-32B + Qwen3-8B。                                  |
+| 任务         | USMLE-style multiple choice QA；建议输出 answer + short rationale。       |
+| 样本量       | 先跑1000条，时间允许全量。                                                |
+| 方法         | Standard SD、Confidence-Relaxed SD、MG-SD/SafeSpec-Pure。                 |
+| 指标         | Accuracy、Answer Flip Rate、Tokens/s、Latency。                           |
+| 主要结论目标 | MG-SD不显著降低 Accuracy，Answer Flip Rate 不高于 Confidence-Relaxed SD。 |
+
+## **实验 D：Overconfident Hallucination 诊断（建议做，但可小规模）**
+
+| **项目**         | **设置**                                                                         |
+| ---------- | -------------------------------------------------------------------------- |
+| 定义     | 错误clinical entity中，p1 > alpha 且 margin 大的比例；alpha 可先取 0.8。 |
+| 目的     | 判断pure margin gate是否漏掉“目标模型自信但错误”的实体幻觉。           |
+| 输出     | OCE比例；错误实体的 p1 分布；高置信错误案例。                            |
+| 后续决策 | 若OCE较高，则在投稿前加入 SafeSpec-Clinical 的轻量 backoff。             |
+
+## **实验 E：超参数简化消融**
+
+| **参数**      | **建议范围**                       | **说明**                                                           |
+| ------- | ------------------------ | ------------------------------------------------------------ |
+| beta  | 0.05, 0.10, 0.15       | 控制relaxation强度。短期可固定 beta=0.10，只做小范围验证。 |
+| delta | 0.01, 0.03, 0.05, 0.10 | 核心安全阈值，建议主文展示delta敏感性。                    |
+| tau   | 暂不使用               | hard gate不需要 tau；若 soft gate 再引入。                 |
+
+建议调参协议：只在 MIMIC-IV-Note dev/pilot 上选择 beta 和 delta，随后固定参数迁移到 MedQA 和不同 draft size。这样可以降低“针对单数据集炼丹”的质疑。
+
+# **八、6 月初前执行排期**
+
+| **阶段**        | **时间窗口**             | **任务**                                                                            | **产出**                                       |
+| --------- | -------------- | ----------------------------------------------------------------------------- | ---------------------------------------- |
+| 第1阶段 | 立即-第 3 天 | 在现有EARS代码中加入 top-2 概率、margin、hard gate；保留原接受循环。        | MG-SD可运行版本；基础单元测试。        |
+| 第2阶段 | 第4 - 7天    | Qwen3-32B + Qwen3-8B/4B跑 MIMIC-IV-Note 300-500 条 pilot。                  | tokens/s、CEER 初表；margin 分布初图。 |
+| 第3阶段 | 第8 - 14天   | 扩大MIMIC-IV-Note到 1000 条；跑 Standard SD、Confidence-Relaxed SD、MG-SD。 | 主结果表；case studies。               |
+| 第4阶段 | 第15 - 20天  | 跑MedQA 1000条或全量；固定参数迁移。                                        | MedQA accuracy、answer flip、速度表。  |
+| 第5阶段 | 第21 - 25天  | 补delta/beta小消融、overconfidence 诊断、错误案例。                         | Pareto图、OCE 分析、消融图。           |
+| 第6阶段 | 第26 - 30天  | 整理实验日志、生成论文主表和图；决定是否加入轻量clinical backoff。          | 完整实验结果包；AAAI写作素材。         |
+
+# **九、风险与备选方案**
+
+| **风险**                              | **现象**                                                           | **应对**                                                                                          |
+| ------------------------------- | ------------------------------------------------------------ | ------------------------------------------------------------------------------------------- |
+| Margin假设不强                | entity token与 non-entity token 的 margin 分布差异不明显。 | 降低claim：从“实体检测”改成“候选碰撞风险控制”；补轻量 clinical backoff。              |
+| 速度损失过大                  | MG-SD过于保守，tokens/s 接近 Standard SD。                 | 降低delta，或从 hard gate 改 soft gate；优先保留 70%-80% 的 Confidence-Relaxed 加速收益。 |
+| CEER差异太小                  | Confidence-Relaxed SD并未显著增加实体错误。                | 提高任务难度：更小draft、更长生成、更高 temperature、药物密集子集。                       |
+| Overconfident hallucination高 | 错误实体常有高p1和大 margin。                              | 启动SafeSpec-Clinical：数字、单位、否定词、左右侧、药物词表命中时关闭 relaxation。        |
+| 自动CEER被质疑                | 实体抽取工具噪声大。                                       | 投稿前补100-200条人工双盲评估，报告与 CEER 的相关性。                                     |
+| 超参数被质疑                  | 结果依赖特定beta/delta。                                   | 固定MIMIC dev参数迁移到 MedQA 和不同 draft size；主文展示小范围敏感性。                   |
+
+# **十、下一步实验清单（按优先级）**
+
+1. P0-1：确认 Qwen3-32B target 与 Qwen3-8B / Qwen3-4B draft 的 speculative decoding pipeline 可稳定运行，并统一 tokenizer、temperature、generation length、batch size。
+2. P0-2：在现有 EARS 代码中加入 top-2 probability extraction，输出 p_{1,i}、p_{2,i}、m_i，并实现 hard margin gate：Tol_i = β · (1 - p_{1,i}) · 1[p_{1,i} - p_{2,i} > δ]。
+3. P0-3：构建 MIMIC-IV-Note clinical note continuation 任务：输入 discharge summary 前 30%-50%，生成 256-512 tokens；先抽 300-500 条 pilot。
+4. P0-4：跑三种方法：Standard SD、Confidence-Relaxed SD、MG-SD。记录 tokens/s、latency、accepted length、p1/p2/margin 日志。
+5. P0-5：搭建初版 CEER：先覆盖 medication、diagnosis/symptom、dose/number/unit 三类。输出 CEER、Med-CEER、Dose/Number Error。
+6. P0-6：画 margin distribution：entity vs non-entity、medication vs general token、number/dose vs general token。
+7. P0-7：扩大 MIMIC-IV-Note 到 1000 条主实验，固定 beta/delta，输出主表。
+8. P0-8：固定同一组 beta/delta 跑 MedQA，输出 accuracy、answer flip rate、tokens/s。
+9. P1-1：做 overconfident error 诊断，统计 p1 > 0.8 且实体错误的比例；若比例高，准备 SafeSpec-Clinical。
+10. P1-2：补 Qwen3-32B + Qwen3-4B draft，如果主实验使用 8B；或反之。证明不同 draft size 下趋势一致。
+11. P1-3：整理 5-10 个临床实体错误案例，展示 Confidence-Relaxed SD 错误接受、MG-SD 关闭 tolerance 的机制证据。
+12. P2-1：投稿前补 100-200 条人工双盲医学错误评估。
+13. P2-2：有余力再加入 MIMIC-CXR / MIMIC-R3G 或 Llama 系列跨模型验证。
+
+# **十一、建议最终论文图表**
+
+| **编号**               | **图/表**                           | **内容**                                                                      | **论文作用**                              |
+| ---------------- | ---------------------------- | ----------------------------------------------------------------------- | ------------------------------- |
+| Table 1        | MIMIC-IV-Note主结果        | Tokens/s、Latency、Accepted Length、CEER、Med-CEER、Dose/Number Error | 核心结果。                    |
+| Table 2        | MedQA结果                  | Accuracy、Answer Flip、Tokens/s                                       | 证明医学推理保持。            |
+| Figure 1       | Margin分布图               | entity vs non-entity的 p1 - p2 分布                                   | 证明机制假设。                |
+| Figure 2       | Speed-safety Pareto        | x: tokens/s；y: CEER                                                  | 证明MG-SD位于更优 trade-off。 |
+| Figure 3       | Token-type acceptance rate | medication/dose/negation/general token的接受率                        | 证明风险选择性保守。          |
+| Figure 4       | Case study                 | 药物/剂量/否定词错误案例，附 p1/p2/margin                             | 增强可解释性。                |
+| Appendix Table | 参数敏感性                 | beta/delta小范围消融                                                  | 防御调参质疑。                |
+
+# **十二、结论性建议**
+
+6 月初前不建议执行完整 SafeSpec-Clinical 大方案。当前最佳路径是做“基于现有 EARS 工程管线的 margin-gated confidence relaxation”：保留 1 - max(P) 作为速度项，新增 m\_i \= p\_{1,i} - p\_{2,i} 作为安全门控项。
+
+短期实验应集中在 Qwen3-32B + Qwen3-8B/4B、MIMIC-IV-Note、MedQA、CEER、margin distribution 五个核心要素上。只要能证明 MG-SD 在 MIMIC-IV-Note 上相对 Confidence-Relaxed SD 显著降低 CEER，同时保持相对 Standard SD 的速度收益，并在 MedQA 上保持 accuracy，AAAI 论文主线就成立。
+
+后续投稿前再补 human evaluation、overconfidence backoff、MIMIC-CXR 或跨模型验证。这样既能控制工作量，又保留向顶会论文升级的空间。
+
+# **参考资料与依据**
+
+**Qwen3-32B model card:**   [https://huggingface.co/Qwen/Qwen3-32B](https://huggingface.co/Qwen/Qwen3-32B)
+
+**Qwen3 GitHub:**   [https://github.com/QwenLM/Qwen3](https://github.com/QwenLM/Qwen3)
+
+**Qwen3 Technical Report:**   [https://arxiv.org/abs/2505.09388](https://arxiv.org/abs/2505.09388)
+
+**MIMIC-IV-Note PhysioNet:**   [https://www.physionet.org/content/mimic-iv-note/2.2/](https://www.physionet.org/content/mimic-iv-note/2.2/)
+
+**MIMIC-IV PhysioNet:**   [https://physionet.org/content/mimiciv/](https://physionet.org/content/mimiciv/)
+
+**MedQA / medical question answering background:**   [https://pmc.ncbi.nlm.nih.gov/articles/PMC10935498/](https://pmc.ncbi.nlm.nih.gov/articles/PMC10935498/)

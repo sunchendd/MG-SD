@@ -1,0 +1,40 @@
+╭──────────────────────────────────────────────────────────────────────────────╮
+│ Performance Test Summary Report                                              │
+╰──────────────────────────────────────────────────────────────────────────────╯
+
+Basic Information:
+┌───────────────────────┬──────────────────────────────────────────────────────┐
+│ Model                 │ Qwen3-32B                                            │
+│ Test Dataset          │ line_by_line                                         │
+│ API Type              │ openai                                               │
+│ Total Generated       │ 5,120.0 tokens                                       │
+│ Avg Output Rate       │ 33.26 tokens/sec                                     │
+│ Total Test Time       │ 153.96 seconds                                       │
+│ Output Path           │ /home/scd/MG-SD/stress/evalscope/baseline/Qwen3-32B  │
+└───────────────────────┴──────────────────────────────────────────────────────┘
+
+
+                                         Detailed Performance Metrics                                         
+┏━━━━━━┳━━━━━━┳━━━━━┳━━━━━━┳━━━━━━━━━┳━━━━━━━━━┳━━━━━━━━━━┳━━━━━━━━━━┳━━━━━━━━━━┳━━━━━━━━━━┳━━━━━━━━┳━━━━━━━━┓
+┃      ┃      ┃     ┃      ┃     Avg ┃     P99 ┃      Avg ┃      P99 ┃      Avg ┃      P99 ┃   Gen. ┃ Success┃
+┃Conc. ┃ Rate ┃ Num ┃  RPS ┃ Lat.(s) ┃ Lat.(s) ┃ TTFT(ms) ┃ TTFT(ms) ┃ TPOT(ms) ┃ TPOT(ms) ┃ toks/s ┃    Rate┃
+┡━━━━━━╇━━━━━━╇━━━━━╇━━━━━━╇━━━━━━━━━╇━━━━━━━━━╇━━━━━━━━━━╇━━━━━━━━━━╇━━━━━━━━━━╇━━━━━━━━━━╇━━━━━━━━╇━━━━━━━━┩
+│    1 │  INF │  10 │ 0.07 │  15.386 │  16.790 │    136.2 │    183.0 │     29.8 │     32.6 │  33.26 │  100.0%│
+└──────┴──────┴─────┴──────┴─────────┴─────────┴──────────┴──────────┴──────────┴──────────┴────────┴────────┘
+
+
+                                   Request Metrics                                   
+┏━━━━━━┳━━━━━┳━━━━━━━━┳━━━━━━━━┳━━━━━━━━━┳━━━━━━━━━┳━━━━━━━━┳━━━━━━━━━━┳━━━━━━━━━━━━┓
+┃      ┃     ┃ Avg In ┃ P99 In ┃ Avg Out ┃ P99 Out ┃ Decode ┃  Decoded ┃       Spec.┃
+┃Conc. ┃ Num ┃   Toks ┃   Toks ┃    Toks ┃    Toks ┃ toks/s ┃ Tok/Iter ┃ Accept Rate┃
+┡━━━━━━╇━━━━━╇━━━━━━━━╇━━━━━━━━╇━━━━━━━━━╇━━━━━━━━━╇━━━━━━━━╇━━━━━━━━━━╇━━━━━━━━━━━━┩
+│    1 │  10 │  253.5 │  314.0 │   512.0 │   512.0 │  33.51 │     2.26 │       55.7%│
+└──────┴─────┴────────┴────────┴─────────┴─────────┴────────┴──────────┴────────────┘
+
+
+               Best Performance Configuration               
+ Highest RPS         Concurrency 1 (0.07 req/sec)           
+ Lowest Latency      Concurrency 1 (15.386 seconds)         
+
+Performance Recommendations:
+• The system seems not to have reached its performance bottleneck, try higher concurrency

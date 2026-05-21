@@ -1,0 +1,85 @@
+--- a/vllm/v1/sample/rejection_sampler.py
++++ b/vllm/v1/sample/rejection_sampler.py
+@@ -3,6 +3,8 @@
+ 
+ from __future__ import annotations
+ 
++import math
++import os
+ from collections.abc import Sequence
+ from dataclasses import replace
+ from typing import TYPE_CHECKING
+@@ -27,6 +29,46 @@
+ 
+ logger = init_logger(__name__)
+ 
++def _parse_float_env(name: str, default: str) -> float:
++    raw_value = os.environ.get(name, default)
++    try:
++        parsed_value = float(raw_value)
++    except ValueError:
++        logger.warning(
++            "Invalid %s=%r, falling back to %s",
++            name,
++            raw_value,
++            default,
++        )
++        return float(default)
++    if not math.isfinite(parsed_value):
++        logger.warning(
++            "Non-finite %s=%r, falling back to %s",
++            name,
++            raw_value,
++            default,
++        )
++        return float(default)
++    return parsed_value
++
++
++EARS_BASE_TOLERANCE = _parse_float_env("VLLM_EARS_BASE_TOLERANCE", "0.0")
++MGSD_ENABLED = os.environ.get("VLLM_MGSD_ENABLED", "0").lower() in (
++    "1",
++    "true",
++    "yes",
++)
++MGSD_MARGIN_DELTA = _parse_float_env("VLLM_MGSD_MARGIN_DELTA", "0.0")
++if EARS_BASE_TOLERANCE > 0:
++    if MGSD_ENABLED:
++        logger.info(
++            "MG-SD enabled with base_tolerance=%.3f margin_delta=%.3f",
++            EARS_BASE_TOLERANCE,
++            MGSD_MARGIN_DELTA,
++        )
++    else:
++        logger.info("EARS enabled with base_tolerance=%.3f", EARS_BASE_TOLERANCE)
++
+ PLACEHOLDER_TOKEN_ID: tl.constexpr = -1
+ GREEDY_TEMPERATURE: tl.constexpr = 0
+ # Maximum number of speculative draft tokens allowed per request in a single
+@@ -469,6 +511,26 @@
+     target_probs = target_logits.softmax(dim=-1, dtype=torch.float32)
+     assert target_probs.is_contiguous()
+ 
++    target_top2_probs = None
++    max_target_probs = None
++    target_margins = None
++    ears_enabled = EARS_BASE_TOLERANCE > 0
++    mgsd_enabled = ears_enabled and MGSD_ENABLED
++    if ears_enabled:
++        if mgsd_enabled:
++            target_top2_probs = target_probs.topk(k=2, dim=-1).values
++            max_target_probs = target_top2_probs[:, 0].contiguous()
++            target_margins = (
++                target_top2_probs[:, 0] - target_top2_probs[:, 1]
++            ).contiguous()
++        else:
++            max_target_probs = target_probs.max(dim=-1).values.contiguous()
++        tolerance = EARS_BASE_TOLERANCE * (1.0 - max_target_probs)
++        if mgsd_enabled:
++            tolerance = torch.where(target_margins > MGSD_MARGIN_DELTA, tolerance, 0.0)
++        assert uniform_probs is not None
++        uniform_probs = uniform_probs - tolerance
++
+     # Sample recovered tokens for each position.
+     # [num_tokens]
+     recovered_token_ids = sample_recovered_tokens(

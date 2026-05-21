@@ -1,0 +1,98 @@
+{
+  "baseline": {
+    "samples": 12,
+    "gold_entities": 300,
+    "substitutions": 74,
+    "deletions": 111,
+    "insertions": 47,
+    "categories": {
+      "medications": {
+        "gold": 53,
+        "errors": 50
+      },
+      "doses": {
+        "gold": 92,
+        "errors": 79
+      },
+      "frequencies": {
+        "gold": 147,
+        "errors": 94
+      },
+      "negations": {
+        "gold": 8,
+        "errors": 9
+      }
+    },
+    "avg_prompt_tokens": 2336.8333333333335,
+    "avg_completion_tokens": 256.0,
+    "ceer": 0.7733333333333333,
+    "medication_error_rate": 0.9433962264150944,
+    "dose_error_rate": 0.8586956521739131,
+    "frequency_error_rate": 0.6394557823129252,
+    "negation_error_rate": 1.125
+  },
+  "ears": {
+    "samples": 12,
+    "gold_entities": 285,
+    "substitutions": 76,
+    "deletions": 65,
+    "insertions": 58,
+    "categories": {
+      "medications": {
+        "gold": 53,
+        "errors": 40
+      },
+      "doses": {
+        "gold": 88,
+        "errors": 75
+      },
+      "frequencies": {
+        "gold": 136,
+        "errors": 76
+      },
+      "negations": {
+        "gold": 8,
+        "errors": 8
+      }
+    },
+    "avg_prompt_tokens": 2336.8333333333335,
+    "avg_completion_tokens": 256.0,
+    "ceer": 0.6982456140350877,
+    "medication_error_rate": 0.7547169811320755,
+    "dose_error_rate": 0.8522727272727273,
+    "frequency_error_rate": 0.5588235294117647,
+    "negation_error_rate": 1.0
+  },
+  "mgsd": {
+    "samples": 12,
+    "gold_entities": 275,
+    "substitutions": 80,
+    "deletions": 54,
+    "insertions": 44,
+    "categories": {
+      "medications": {
+        "gold": 52,
+        "errors": 34
+      },
+      "doses": {
+        "gold": 83,
+        "errors": 66
+      },
+      "frequencies": {
+        "gold": 132,
+        "errors": 69
+      },
+      "negations": {
+        "gold": 8,
+        "errors": 9
+      }
+    },
+    "avg_prompt_tokens": 2336.8333333333335,
+    "avg_completion_tokens": 256.0,
+    "ceer": 0.6472727272727272,
+    "medication_error_rate": 0.6538461538461539,
+    "dose_error_rate": 0.7951807228915663,
+    "frequency_error_rate": 0.5227272727272727,
+    "negation_error_rate": 1.125
+  }
+}

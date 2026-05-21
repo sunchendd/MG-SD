@@ -1,0 +1,77 @@
+From 7deb88919d8299187ad99931d91745276bb0bdfe Mon Sep 17 00:00:00 2001
+From: sunchendd <sunchendong@kunlunit.com>
+Date: Thu, 21 May 2026 06:35:51 +0000
+Subject: [PATCH 3/3] MG-SD v3
+
+---
+ v1/sample/rejection_sampler.py | 29 +++++------------------------
+ 1 file changed, 5 insertions(+), 24 deletions(-)
+
+diff --git a/v1/sample/rejection_sampler.py b/v1/sample/rejection_sampler.py
+index 396f309..7cc4770 100644
+--- a/v1/sample/rejection_sampler.py
++++ b/v1/sample/rejection_sampler.py
+@@ -525,6 +525,11 @@ def rejection_sample(
+             ).contiguous()
+         else:
+             max_target_probs = target_probs.max(dim=-1).values.contiguous()
++        tolerance = EARS_BASE_TOLERANCE * (1.0 - max_target_probs)
++        if mgsd_enabled:
++            tolerance = torch.where(target_margins > MGSD_MARGIN_DELTA, tolerance, 0.0)
++        assert uniform_probs is not None
++        uniform_probs = uniform_probs - tolerance
+ 
+     # Sample recovered tokens for each position.
+     # [num_tokens]
+@@ -554,14 +559,8 @@ def rejection_sample(
+         max_spec_len,
+         vocab_size,
+         synthetic_conditional_rates,
+-        max_target_probs,
+-        target_margins,
+-        EARS_BASE_TOLERANCE,
+-        MGSD_MARGIN_DELTA,
+         NO_DRAFT_PROBS=draft_probs is None,
+         SYNTHETIC_MODE=synthetic_mode,
+-        EARS_ENABLED=ears_enabled,
+-        MGSD_ENABLED=mgsd_enabled,
+     )
+     return output_token_ids
+ 
+@@ -835,14 +834,8 @@ def rejection_random_sample_kernel(
+     max_spec_len,
+     vocab_size,
+     synthetic_conditional_rates_ptr,  # [num_speculative_tokens] or None
+-    max_target_probs_ptr,  # [num_tokens] or None
+-    target_margins_ptr,  # [num_tokens] or None
+-    ears_base_tolerance,
+-    mgsd_margin_delta,
+     NO_DRAFT_PROBS: tl.constexpr,
+     SYNTHETIC_MODE: tl.constexpr,
+-    EARS_ENABLED: tl.constexpr,
+-    MGSD_ENABLED: tl.constexpr,
+ ):
+     req_idx = tl.program_id(0)
+     is_greedy = tl.load(is_greedy_ptr + req_idx)
+@@ -877,18 +870,6 @@ def rejection_random_sample_kernel(
+                 # NOTE(woosuk): While the draft probability should never be 0,
+                 # we check it to avoid NaNs. If it happens to be 0, we reject.
+                 accepted = draft_prob > 0 and target_prob / draft_prob >= uniform_prob
+-                if EARS_ENABLED and not accepted and draft_prob > 0:
+-                    ratio = target_prob / draft_prob
+-                    max_target_prob = tl.load(max_target_probs_ptr + start_idx + pos)
+-                    tolerance = ears_base_tolerance * (1.0 - max_target_prob)
+-                    if MGSD_ENABLED:
+-                        margin = tl.load(target_margins_ptr + start_idx + pos)
+-                        tolerance = tl.where(
+-                            margin > mgsd_margin_delta,
+-                            tolerance,
+-                            0.0,
+-                        )
+-                    accepted = ratio >= (uniform_prob - tolerance)
+             if accepted:
+                 token_id = draft_token_id
+             else:
+-- 
+2.34.1
+

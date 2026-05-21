@@ -1,0 +1,125 @@
+2026-05-21 07:45:17 - evalscope - INFO: Starting benchmark with args: 
+2026-05-21 07:45:17 - evalscope - INFO: {
+    "model": "Qwen3-32B",
+    "model_id": "Qwen3-32B",
+    "attn_implementation": null,
+    "api": "openai",
+    "tokenizer_path": "/data/models/Qwen3-32B",
+    "port": 8877,
+    "url": "http://127.0.0.1:8000/v1/chat/completions",
+    "headers": {},
+    "connect_timeout": null,
+    "read_timeout": null,
+    "total_timeout": 21600,
+    "api_key": null,
+    "no_test_connection": false,
+    "number": 20,
+    "parallel": 1,
+    "rate": -1.0,
+    "warmup_num": 0,
+    "open_loop": false,
+    "sleep_interval": 5,
+    "sla_auto_tune": false,
+    "sla_variable": "parallel",
+    "sla_params": null,
+    "sla_num_runs": 3,
+    "sla_upper_bound": 65536,
+    "sla_lower_bound": 1,
+    "sla_fixed_parallel": null,
+    "sla_number_multiplier": null,
+    "db_commit_interval": 1000,
+    "queue_size_multiplier": 5,
+    "in_flight_task_multiplier": 2,
+    "log_every_n_query": 100,
+    "debug": false,
+    "enable_progress_tracker": false,
+    "visualizer": null,
+    "wandb_api_key": null,
+    "swanlab_api_key": null,
+    "name": null,
+    "outputs_dir": "/home/scd/MG-SD/evalscope/baseline/Qwen3-32B",
+    "no_timestamp": true,
+    "max_prompt_length": 131072,
+    "min_prompt_length": 0,
+    "prefix_length": 0,
+    "prompt": null,
+    "query_template": null,
+    "apply_chat_template": true,
+    "image_width": 224,
+    "image_height": 224,
+    "image_format": "RGB",
+    "image_num": 1,
+    "image_patch_size": 28,
+    "dataset": "line_by_line",
+    "dataset_path": "/home/scd/MG-SD/mimic_evalscope_messages.jsonl",
+    "dataset_offset": 0,
+    "frequency_penalty": null,
+    "repetition_penalty": null,
+    "logprobs": null,
+    "max_tokens": 256,
+    "min_tokens": null,
+    "n_choices": null,
+    "seed": null,
+    "stop": null,
+    "stop_token_ids": null,
+    "stream": true,
+    "temperature": 0.0,
+    "top_p": null,
+    "top_k": null,
+    "extra_args": {},
+    "tokenize_prompt": false,
+    "multi_turn": false,
+    "min_turns": 1,
+    "max_turns": null,
+    "multi_turn_args": null
+}
+2026-05-21 07:45:21 - evalscope - INFO: Test connection successful.
+2026-05-21 07:45:22 - evalscope - INFO: Generating[requests] 100%| 20/20 [Elapsed: 00:00 < Remaining: 00:00, 63097.21it/s]
+2026-05-21 07:45:22 - evalscope - INFO: Save the data base to: /home/scd/MG-SD/evalscope/baseline/Qwen3-32B/parallel_1_number_20/benchmark_data.db
+2026-05-21 07:46:26 - evalscope - INFO: Processing[parallel_1_number_20]  45%| 9/20 [Elapsed: 01:03 < Remaining: 01:18,  7.18s/it]
+2026-05-21 07:47:30 - evalscope - INFO: Processing[parallel_1_number_20]  90%| 18/20 [Elapsed: 02:07 < Remaining: 00:14,  7.42s/it]
+2026-05-21 07:47:44 - evalscope - INFO: Processing[parallel_1_number_20] 100%| 20/20 [Elapsed: 02:22 < Remaining: 00:00,  7.20s/it]
+2026-05-21 07:47:44 - evalscope - INFO: 
+Benchmarking summary:
+┌────────────────────────────┬─────────────┐
+│ Metric                     │       Value │
+├────────────────────────────┼─────────────┤
+│ ── General ──              │             │
+│ Test Duration (s)          │      141.93 │
+│ Concurrency                │           1 │
+│ Request Rate (req/s)       │       -1.00 │
+│ Total / Success / Failed   │ 20 / 20 / 0 │
+│ Req Throughput (req/s)     │        0.14 │
+│ ── Latency ──              │             │
+│ Avg Latency (s)            │        7.09 │
+│ TTFT (ms)                  │      133.57 │
+│ TPOT (ms)                  │       27.28 │
+│ ITL (ms)                   │       66.26 │
+│ ── Tokens ──               │             │
+│ Avg Input Tokens           │      245.00 │
+│ Avg Output Tokens          │      256.00 │
+│ Output Throughput (tok/s)  │       36.07 │
+│ Total Throughput (tok/s)   │       70.60 │
+│ ── Speculative Decoding ── │             │
+│ Decoded Tok/Iter           │        2.44 │
+│ Spec. Accept Rate          │        0.59 │
+└────────────────────────────┴─────────────┘
+2026-05-21 07:47:44 - evalscope - INFO: 
+Percentile results:
+┌────────────────┬────────┬────────┬────────┬────────┬────────┬────────┬────────┬────────┬────────┐
+│ Metric         │     1% │     5% │    10% │    25% │    50% │    75% │    90% │    95% │    99% │
+├────────────────┼────────┼────────┼────────┼────────┼────────┼────────┼────────┼────────┼────────┤
+│ Latency (s)    │   6.02 │   6.24 │   6.58 │   6.78 │   7.10 │   7.55 │   7.58 │   8.20 │   8.20 │
+│ TTFT (ms)      │ 111.96 │ 115.18 │ 115.25 │ 118.29 │ 122.06 │ 135.26 │ 176.90 │ 241.65 │ 241.65 │
+│ ITL (ms)       │  61.57 │  65.65 │  65.84 │  66.11 │  66.45 │  66.90 │  67.72 │  72.06 │  74.12 │
+│ TPOT (ms)      │  23.08 │  23.95 │  25.32 │  26.10 │  27.39 │  28.96 │  29.26 │  31.72 │  31.72 │
+│ Input tokens   │ 220.00 │ 224.00 │ 226.00 │ 234.00 │ 242.00 │ 257.00 │ 266.00 │ 314.00 │ 314.00 │
+│ Output tokens  │ 256.00 │ 256.00 │ 256.00 │ 256.00 │ 256.00 │ 256.00 │ 256.00 │ 256.00 │ 256.00 │
+│ Output (tok/s) │  31.22 │  33.77 │  33.85 │  34.54 │  36.12 │  37.95 │  41.03 │  42.52 │  42.52 │
+│ Total (tok/s)  │  58.05 │  64.77 │  65.00 │  66.39 │  70.25 │  75.61 │  81.90 │  83.54 │  83.54 │
+│ Decode (tok/s) │  31.53 │  34.18 │  34.27 │  34.97 │  36.59 │  38.46 │  41.75 │  43.32 │  43.32 │
+└────────────────┴────────┴────────┴────────┴────────┴────────┴────────┴────────┴────────┴────────┘
+2026-05-21 07:47:44 - evalscope - INFO: Save the summary to: /home/scd/MG-SD/evalscope/baseline/Qwen3-32B/parallel_1_number_20
+2026-05-21 07:47:44 - evalscope - INFO: Running[perf] 100%| 1/1 [Elapsed: 02:27 < Remaining: 00:00, 147.51s/it]
+2026-05-21 07:47:44 - evalscope - INFO: Performance summary saved to: /home/scd/MG-SD/evalscope/baseline/Qwen3-32B/performance_summary.txt
+2026-05-21 07:47:45 - evalscope - INFO: HTML report generated: /home/scd/MG-SD/evalscope/baseline/Qwen3-32B/perf_report.html

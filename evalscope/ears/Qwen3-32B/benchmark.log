@@ -1,0 +1,125 @@
+2026-05-21 07:49:15 - evalscope - INFO: Starting benchmark with args: 
+2026-05-21 07:49:15 - evalscope - INFO: {
+    "model": "Qwen3-32B",
+    "model_id": "Qwen3-32B",
+    "attn_implementation": null,
+    "api": "openai",
+    "tokenizer_path": "/data/models/Qwen3-32B",
+    "port": 8877,
+    "url": "http://127.0.0.1:8000/v1/chat/completions",
+    "headers": {},
+    "connect_timeout": null,
+    "read_timeout": null,
+    "total_timeout": 21600,
+    "api_key": null,
+    "no_test_connection": false,
+    "number": 20,
+    "parallel": 1,
+    "rate": -1.0,
+    "warmup_num": 0,
+    "open_loop": false,
+    "sleep_interval": 5,
+    "sla_auto_tune": false,
+    "sla_variable": "parallel",
+    "sla_params": null,
+    "sla_num_runs": 3,
+    "sla_upper_bound": 65536,
+    "sla_lower_bound": 1,
+    "sla_fixed_parallel": null,
+    "sla_number_multiplier": null,
+    "db_commit_interval": 1000,
+    "queue_size_multiplier": 5,
+    "in_flight_task_multiplier": 2,
+    "log_every_n_query": 100,
+    "debug": false,
+    "enable_progress_tracker": false,
+    "visualizer": null,
+    "wandb_api_key": null,
+    "swanlab_api_key": null,
+    "name": null,
+    "outputs_dir": "/home/scd/MG-SD/evalscope/ears/Qwen3-32B",
+    "no_timestamp": true,
+    "max_prompt_length": 131072,
+    "min_prompt_length": 0,
+    "prefix_length": 0,
+    "prompt": null,
+    "query_template": null,
+    "apply_chat_template": true,
+    "image_width": 224,
+    "image_height": 224,
+    "image_format": "RGB",
+    "image_num": 1,
+    "image_patch_size": 28,
+    "dataset": "line_by_line",
+    "dataset_path": "/home/scd/MG-SD/mimic_evalscope_messages.jsonl",
+    "dataset_offset": 0,
+    "frequency_penalty": null,
+    "repetition_penalty": null,
+    "logprobs": null,
+    "max_tokens": 256,
+    "min_tokens": null,
+    "n_choices": null,
+    "seed": null,
+    "stop": null,
+    "stop_token_ids": null,
+    "stream": true,
+    "temperature": 0.0,
+    "top_p": null,
+    "top_k": null,
+    "extra_args": {},
+    "tokenize_prompt": false,
+    "multi_turn": false,
+    "min_turns": 1,
+    "max_turns": null,
+    "multi_turn_args": null
+}
+2026-05-21 07:49:19 - evalscope - INFO: Test connection successful.
+2026-05-21 07:49:20 - evalscope - INFO: Generating[requests] 100%| 20/20 [Elapsed: 00:00 < Remaining: 00:00, 90456.05it/s]
+2026-05-21 07:49:20 - evalscope - INFO: Save the data base to: /home/scd/MG-SD/evalscope/ears/Qwen3-32B/parallel_1_number_20/benchmark_data.db
+2026-05-21 07:50:23 - evalscope - INFO: Processing[parallel_1_number_20]  45%| 9/20 [Elapsed: 01:02 < Remaining: 01:18,  7.10s/it]
+2026-05-21 07:51:27 - evalscope - INFO: Processing[parallel_1_number_20]  90%| 18/20 [Elapsed: 02:07 < Remaining: 00:15,  7.53s/it]
+2026-05-21 07:51:41 - evalscope - INFO: Processing[parallel_1_number_20] 100%| 20/20 [Elapsed: 02:21 < Remaining: 00:00,  7.21s/it]
+2026-05-21 07:51:41 - evalscope - INFO: 
+Benchmarking summary:
+┌────────────────────────────┬─────────────┐
+│ Metric                     │       Value │
+├────────────────────────────┼─────────────┤
+│ ── General ──              │             │
+│ Test Duration (s)          │      141.05 │
+│ Concurrency                │           1 │
+│ Request Rate (req/s)       │       -1.00 │
+│ Total / Success / Failed   │ 20 / 20 / 0 │
+│ Req Throughput (req/s)     │        0.14 │
+│ ── Latency ──              │             │
+│ Avg Latency (s)            │        7.05 │
+│ TTFT (ms)                  │      123.60 │
+│ TPOT (ms)                  │       27.15 │
+│ ITL (ms)                   │       65.94 │
+│ ── Tokens ──               │             │
+│ Avg Input Tokens           │      245.00 │
+│ Avg Output Tokens          │      256.00 │
+│ Output Throughput (tok/s)  │       36.30 │
+│ Total Throughput (tok/s)   │       71.04 │
+│ ── Speculative Decoding ── │             │
+│ Decoded Tok/Iter           │        2.44 │
+│ Spec. Accept Rate          │        0.59 │
+└────────────────────────────┴─────────────┘
+2026-05-21 07:51:41 - evalscope - INFO: 
+Percentile results:
+┌────────────────┬────────┬────────┬────────┬────────┬────────┬────────┬────────┬────────┬────────┐
+│ Metric         │     1% │     5% │    10% │    25% │    50% │    75% │    90% │    95% │    99% │
+├────────────────┼────────┼────────┼────────┼────────┼────────┼────────┼────────┼────────┼────────┤
+│ Latency (s)    │   5.94 │   6.23 │   6.51 │   6.78 │   7.06 │   7.37 │   7.52 │   8.43 │   8.43 │
+│ TTFT (ms)      │ 104.29 │ 108.26 │ 110.40 │ 113.35 │ 120.38 │ 129.53 │ 154.90 │ 173.22 │ 173.22 │
+│ ITL (ms)       │  64.91 │  65.47 │  65.59 │  65.81 │  66.06 │  66.43 │  67.45 │  72.88 │  73.85 │
+│ TPOT (ms)      │  22.79 │  23.92 │  25.07 │  26.04 │  27.25 │  28.42 │  29.02 │  32.67 │  32.67 │
+│ Input tokens   │ 220.00 │ 224.00 │ 226.00 │ 234.00 │ 242.00 │ 257.00 │ 266.00 │ 314.00 │ 314.00 │
+│ Output tokens  │ 256.00 │ 256.00 │ 256.00 │ 256.00 │ 256.00 │ 256.00 │ 256.00 │ 256.00 │ 256.00 │
+│ Output (tok/s) │  30.35 │  34.03 │  34.08 │  34.78 │  36.37 │  38.01 │  41.10 │  43.08 │  43.08 │
+│ Total (tok/s)  │  56.43 │  65.36 │  66.11 │  67.00 │  70.72 │  76.63 │  82.04 │  84.65 │  84.65 │
+│ Decode (tok/s) │  30.61 │  34.46 │  34.61 │  35.21 │  36.81 │  38.51 │  41.81 │  43.88 │  43.88 │
+└────────────────┴────────┴────────┴────────┴────────┴────────┴────────┴────────┴────────┴────────┘
+2026-05-21 07:51:41 - evalscope - INFO: Save the summary to: /home/scd/MG-SD/evalscope/ears/Qwen3-32B/parallel_1_number_20
+2026-05-21 07:51:41 - evalscope - INFO: Running[perf] 100%| 1/1 [Elapsed: 02:26 < Remaining: 00:00, 146.33s/it]
+2026-05-21 07:51:41 - evalscope - INFO: Performance summary saved to: /home/scd/MG-SD/evalscope/ears/Qwen3-32B/performance_summary.txt
+2026-05-21 07:51:42 - evalscope - INFO: HTML report generated: /home/scd/MG-SD/evalscope/ears/Qwen3-32B/perf_report.html
