@@ -170,6 +170,22 @@ class MedicationLexiconTests(unittest.TestCase):
     self.assertIn("acetaminophen", aliases)
     self.assertIn("furosemide", aliases)
 
+  def test_extracts_multiword_parenthesized_alias(self):
+    text = "Patient is on Emtricitabine-Tenofovir (Truvada) 200 mg daily."
+    entities = extract_entities(text, {"Emtricitabine-Tenofovir (Truvada)"})
+    # normalize_medication_text lowercases and removes punctuation into spaces
+    self.assertEqual(entities["medications"], Counter({"emtricitabine tenofovir truvada": 1}))
+
+  def test_tags_margin_rows_with_multiword_alias(self):
+    rows = [
+      {"token": "Emtricitabine-Tenofovir", "margin": 0.05},
+      {"token": " (Truvada)", "margin": 0.03},
+      {"token": " 200", "margin": 0.02},
+      {"token": " mg", "margin": 0.01},
+    ]
+    tagged = tag_margin_rows_with_entities(rows, {"Emtricitabine-Tenofovir (Truvada)"})
+    self.assertEqual([r["entity_type"] for r in tagged], ["medication", "medication", "dose", "dose"])
+
 
 if __name__ == "__main__":
   unittest.main()

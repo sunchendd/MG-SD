@@ -59,27 +59,51 @@ def completion_logprobs_to_margin_rows(logprobs):
 
 
 def tag_margin_rows_with_entities(rows, medication_lexicon):
-  text = "".join(row["token"] for row in rows)
+  # Build a normalized representation of the concatenated tokens and per-row
+  # normalized token spans so we can match multi-word aliases consistently.
+  original_text = "".join(row["token"] for row in rows)
+  norm_tokens = [normalize_medication_text(row.get("token", "")) for row in rows]
+  # Join with single space to mirror normalize_medication_text behavior across tokens
+  norm_text = " ".join(t for t in norm_tokens if t).strip()
   spans = []
 
-  med_words = {word.lower() for word in medication_lexicon}
-  for match in WORD_RE.finditer(text):
-    token = match.group(0).lower()
-    if token in med_words:
-      spans.append((match.start(), match.end(), "medication"))
+  # Medication spans: find any alias occurrences in the normalized text
+  normalized_aliases = build_medication_alias_set(medication_lexicon)
+  for alias in normalized_aliases:
+    if not alias:
+      continue
+    # use word boundaries around the alias to avoid partial matches
+    pattern = r"\b" + re.escape(alias) + r"\b"
+    for m in re.finditer(pattern, norm_text):
+      spans.append((m.start(), m.end(), "medication"))
+
+  # Other entity types: find on normalized text as well
   for regex, label in ((DOSE_RE, "dose"), (FREQ_RE, "frequency"), (NEG_RE, "negation")):
-    for match in regex.finditer(text):
+    for match in regex.finditer(norm_text):
       spans.append((match.start(), match.end(), label))
 
-  tagged = []
+  # Map normalized character positions back to per-row normalized token spans
+  norm_positions = []
   cursor = 0
-  for row in rows:
+  for i, tok in enumerate(norm_tokens):
+    if not tok:
+      norm_positions.append((cursor, cursor))
+      # if next token exists, account for the separating space we added when joining
+      if i < len(norm_tokens) - 1 and any(norm_tokens[i+1:]):
+        cursor += 1
+      continue
     start = cursor
-    end = cursor + len(row["token"])
-    cursor = end
+    end = start + len(tok)
+    norm_positions.append((start, end))
+    # advance cursor: add one for the space between tokens if not last non-empty
+    cursor = end + 1
+
+  # Assign entity labels to rows if their normalized span overlaps any matched span
+  tagged = []
+  for (row, (nstart, nend)) in zip(rows, norm_positions):
     entity_type = None
     for span_start, span_end, label in spans:
-      if span_start < end and span_end > start:
+      if span_start < nend and span_end > nstart:
         entity_type = label
         break
     tagged.append({**row, "entity_type": entity_type})
@@ -143,7 +167,8 @@ def build_prompt_and_gold(note, prompt_fraction=0.4, max_gold_chars=1200):
 
 
 def extract_entities(text, medication_lexicon):
-  norm_text = re.sub(r"\s+", " ", text).strip()
+  # Normalize text to a canonical, lowercased, punctuation-normalized form
+  norm_text = normalize_medication_text(text)
   normalized_aliases = build_medication_alias_set(medication_lexicon)
   entities = {
     "medications": Counter(),
@@ -152,10 +177,14 @@ def extract_entities(text, medication_lexicon):
     "negations": Counter(m.group(0).lower() for m in NEG_RE.finditer(norm_text)),
   }
 
-  for match in WORD_RE.finditer(norm_text):
-    token = normalize_medication_text(match.group(0))
-    if token in normalized_aliases:
-      entities["medications"][token] += 1
+  # For medication aliases (which can be multi-word), search for alias occurrences
+  # in the normalized text using word-boundary aware regexes.
+  for alias in build_medication_alias_set(medication_lexicon):
+    if not alias:
+      continue
+    pattern = r"\b" + re.escape(alias) + r"\b"
+    for m in re.finditer(pattern, norm_text):
+      entities["medications"][alias] += 1
   return entities
 
 
