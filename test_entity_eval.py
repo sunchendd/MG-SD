@@ -16,6 +16,8 @@ from entity_eval import (
   score_entity_errors,
 )
 
+from run_entity_eval_pilot import dedupe_rows_by_note_prefix, is_clean_discharge_medications_section
+
 
 class EntityEvalTests(unittest.TestCase):
   def test_converts_completion_logprobs_into_margin_rows(self):
@@ -122,6 +124,36 @@ class EntityEvalTests(unittest.TestCase):
     self.assertLessEqual(len(gold), 80)
     self.assertNotEqual(prompt, note)
     self.assertNotIn(gold, prompt)
+
+
+
+class DatasetSelectionTests(unittest.TestCase):
+  def test_keeps_only_one_row_per_note_prefix(self):
+    rows = [
+      {"note_id": "10000032-DS-21", "prompt": "p1", "gold": "Discharge Medications: 1. Aspirin 81 mg PO DAILY"},
+      {"note_id": "10000032-DS-22", "prompt": "p2", "gold": "Discharge Medications: 1. Furosemide 40 mg PO DAILY"},
+      {"note_id": "10000935-DS-18", "prompt": "p3", "gold": "Discharge Medications: 1. Metformin 500 mg PO BID"},
+    ]
+
+    deduped = dedupe_rows_by_note_prefix(rows)
+
+    self.assertEqual([row["note_id"] for row in deduped], [
+      "10000032-DS-21",
+      "10000935-DS-18",
+    ])
+
+  def test_rejects_non_clean_discharge_medication_sections(self):
+    dirty = (
+      "Discharge Medications: 1. Aspirin 81 mg PO DAILY "
+      "# CODE: full confirmed Follow-up with PCP next week"
+    )
+    clean = (
+      "Discharge Medications: 1. Aspirin 81 mg PO DAILY "
+      "2. Furosemide 40 mg PO DAILY 3. Metformin 500 mg PO BID"
+    )
+
+    self.assertFalse(is_clean_discharge_medications_section(dirty))
+    self.assertTrue(is_clean_discharge_medications_section(clean))
 
 
 if __name__ == "__main__":

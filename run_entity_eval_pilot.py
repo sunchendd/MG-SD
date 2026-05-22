@@ -47,6 +47,15 @@ SECTION_MARKERS = [
 ]
 
 
+def dedupe_rows_by_note_prefix(rows):
+  raise NotImplementedError
+
+
+def is_clean_discharge_medications_section(text):
+  raise NotImplementedError
+
+
+
 def prepare_dataset(output_path, sample_count, prompt_fraction, max_gold_chars):
   source = Path("/home/scd/mimic-iv-note/note/discharge.csv.gz")
   rows = []
