@@ -142,6 +142,93 @@ cd /home/scd/MG-SD
 python3 run_entity_eval_pilot.py --sample-count 12 --max-tokens 256 --temperature 0.9
 ```
 
+### 5.4 当前“实体错误”是怎么评估的
+
+当前这套实体错误评估，**不是人工标注金标准**，而是一套 **regex + lexicon 的 proxy**。
+
+#### 数据来源与切分
+
+- 数据源：`/home/scd/mimic-iv-note/note/discharge.csv.gz`
+- 优先对齐：
+  - `Discharge Medications:`
+  - `Medications on discharge:`
+- 切分方式：
+  - note 前半段作为 `prompt`
+  - 后续药物段作为 `gold`
+- 实际打分时，为避免输出比 gold 短导致大量伪 deletion：
+  - 使用 `gold_window = gold[:len(output)]`
+
+#### 实体类别
+
+当前只统计 4 类：
+
+1. **medications**
+   - 来自手工药名字典 `MEDICATION_LEXICON`
+2. **doses**
+   - 由正则抽取，例如 `5 mg`、`10 ml`、`2 units`
+3. **frequencies**
+   - 由正则抽取，例如 `daily`、`bid`、`tid`、`q6h`、`prn`
+4. **negations**
+   - 由正则抽取，例如 `no`、`not`、`denies`、`without`
+
+#### 样本筛选条件
+
+不是随机抽样，而是先筛 **medication-heavy** continuation。
+
+在 `gold[:800]` 内至少满足：
+
+- 药名 `>= 2`
+- 剂量 `>= 2`
+- 频次 + 否定 `>= 1`
+
+#### 打分方式
+
+对 `gold_window` 和 `output` 分别抽实体 Counter，然后按类别比较：
+
+- **substitution**：gold 和输出都有，但词项不一致
+- **deletion**：gold 有，输出缺失
+- **insertion**：gold 没有，输出多出来
+
+最后汇总为：
+
+- `ceer = (substitutions + deletions + insertions) / gold_entities`
+- `medication_error_rate = medication_errors / gold_medications`
+- `dose_error_rate = dose_errors / gold_doses`
+- `frequency_error_rate = frequency_errors / gold_frequencies`
+- `negation_error_rate = negation_errors / gold_negations`
+
+所以当前“实体错误”更准确的说法是：
+
+> 基于药物段续写的 clinical entity fidelity proxy，而不是最终人工标注 CEER 金标准。
+
+### 5.5 当前 `p1 / p2 / margin` 是怎么来的
+
+这部分是**机制分析指标**，不是实体错误本身。
+
+来源：
+
+1. 调用 completions API 时设置 `logprobs=2`
+2. 对每个输出 token 读取 top-2 logprob
+3. 转成概率：
+   - `p1 = exp(top1_logprob)`
+   - `p2 = exp(top2_logprob)`
+4. 计算：
+   - `margin = p1 - p2`
+5. 再把 token 标成：
+   - entity token
+   - non-entity token
+
+最终统计：
+
+- `low_margin_entity_rate`
+- `low_margin_non_entity_rate`
+- `mean_entity_margin`
+- `mean_non_entity_margin`
+
+它的作用是验证：
+
+> MG-SD 拦下来的位置，是否真的集中在 low-margin entity tokens 上。
+
 ## 6. 测试结果
 
 ### 6.1 temperature=0 smoke test
