@@ -9,8 +9,6 @@ import subprocess
 import time
 from pathlib import Path
 
-import requests
-from transformers import AutoTokenizer
 
 from entity_eval import (
   build_prompt_and_gold,
@@ -150,6 +148,7 @@ def start_server(mode, port, log_path):
 
 
 def wait_ready(port, process):
+  import requests
   deadline = time.time() + 900
   while time.time() < deadline:
     if process.poll() is not None:
@@ -182,6 +181,7 @@ def stop_server(process):
 
 
 def generate_one(port, prompt, max_tokens, temperature, seed, logprobs):
+  import requests
   payload = {
     "model": "Qwen3-32B",
     "prompt": prompt,
@@ -325,6 +325,7 @@ def main():
     prompt_fraction=args.prompt_fraction,
     max_gold_chars=args.max_gold_chars,
   )
+  from transformers import AutoTokenizer
   tokenizer = AutoTokenizer.from_pretrained("/data/models/Qwen3-32B", trust_remote_code=True)
   max_prompt_tokens = 4096 - args.max_tokens - 32
   for row in dataset:
