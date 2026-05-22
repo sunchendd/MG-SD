@@ -82,30 +82,38 @@ def tag_margin_rows_with_entities(rows, medication_lexicon):
     for match in regex.finditer(norm_text):
       spans.append((match.start(), match.end(), label))
 
-  # Map normalized character positions back to per-row normalized token spans
+  # Map normalized character positions back to per-row normalized token spans.
+  # We locate each non-empty normalized token by searching sequentially in norm_text
+  # so that multi-word aliases map correctly even when some rows normalize to empty
   norm_positions = []
   cursor = 0
-  for i, tok in enumerate(norm_tokens):
+  for tok in norm_tokens:
     if not tok:
+      # Empty normalized tokens (e.g., punctuation-only rows) get a zero-length span
+      # at the current cursor. We do NOT assign entities to such rows below.
       norm_positions.append((cursor, cursor))
-      # if next token exists, account for the separating space we added when joining
-      if i < len(norm_tokens) - 1 and any(norm_tokens[i+1:]):
-        cursor += 1
       continue
-    start = cursor
+    # find next occurrence of this normalized token in the joined normalized text
+    idx = norm_text.find(tok, cursor)
+    if idx == -1:
+      # Fallback: if not found, assign a span at the current cursor
+      start = cursor
+    else:
+      start = idx
     end = start + len(tok)
     norm_positions.append((start, end))
-    # advance cursor: add one for the space between tokens if not last non-empty
-    cursor = end + 1
+    cursor = end
 
   # Assign entity labels to rows if their normalized span overlaps any matched span
   tagged = []
-  for (row, (nstart, nend)) in zip(rows, norm_positions):
+  for i, (row, (nstart, nend)) in enumerate(zip(rows, norm_positions)):
     entity_type = None
-    for span_start, span_end, label in spans:
-      if span_start < nend and span_end > nstart:
-        entity_type = label
-        break
+    # Do not assign entities to rows that normalize to empty strings (punctuation-only)
+    if norm_tokens[i]:
+      for span_start, span_end, label in spans:
+        if span_start < nend and span_end > nstart:
+          entity_type = label
+          break
     tagged.append({**row, "entity_type": entity_type})
   return tagged
 

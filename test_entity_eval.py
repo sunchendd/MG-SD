@@ -186,6 +186,17 @@ class MedicationLexiconTests(unittest.TestCase):
     tagged = tag_margin_rows_with_entities(rows, {"Emtricitabine-Tenofovir (Truvada)"})
     self.assertEqual([r["entity_type"] for r in tagged], ["medication", "medication", "dose", "dose"])
 
+  def test_does_not_tag_empty_normalized_tokens_as_medication(self):
+    # Alias "A-B" normalizes to "a b"; the comma normalizes to empty string.
+    # Expectation: rows for "A" and "B" are tagged as medication, comma is not.
+    rows = [
+      {"token": "A", "margin": 0.05},
+      {"token": ",", "margin": 0.03},
+      {"token": "B", "margin": 0.02},
+    ]
+    tagged = tag_margin_rows_with_entities(rows, {"A-B"})
+    self.assertEqual([r["entity_type"] for r in tagged], ["medication", None, "medication"])
+
 
 if __name__ == "__main__":
   unittest.main()
