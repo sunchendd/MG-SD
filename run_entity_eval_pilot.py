@@ -14,9 +14,12 @@ from transformers import AutoTokenizer
 
 from entity_eval import (
   build_prompt_and_gold,
+  completion_logprobs_to_margin_rows,
   extract_entities,
   keep_prompt_tail_with_token_limit,
   score_entity_errors,
+  summarize_margin_rows,
+  tag_margin_rows_with_entities,
 )
 
 
@@ -107,11 +110,11 @@ def start_server(mode, port, log_path):
   env.pop("VLLM_MGSD_ENABLED", None)
   env.pop("VLLM_MGSD_MARGIN_DELTA", None)
 
-  if mode in {"ears", "mgsd"}:
+  if mode == "ears" or mode.startswith("mgsd-"):
     env["VLLM_EARS_BASE_TOLERANCE"] = "0.1"
-  if mode == "mgsd":
+  if mode.startswith("mgsd-"):
     env["VLLM_MGSD_ENABLED"] = "1"
-    env["VLLM_MGSD_MARGIN_DELTA"] = "0.1"
+    env["VLLM_MGSD_MARGIN_DELTA"] = mode.removeprefix("mgsd-d")
 
   cmd = [
     "vllm", "serve", "/data/models/Qwen3-32B",
@@ -169,13 +172,14 @@ def stop_server(process):
     log_handle.close()
 
 
-def generate_one(port, prompt, max_tokens, temperature, seed):
+def generate_one(port, prompt, max_tokens, temperature, seed, logprobs):
   payload = {
     "model": "Qwen3-32B",
     "prompt": prompt,
     "max_tokens": max_tokens,
     "temperature": temperature,
     "seed": seed,
+    "logprobs": logprobs,
   }
   response = requests.post(
     f"http://127.0.0.1:{port}/v1/completions",
@@ -184,7 +188,8 @@ def generate_one(port, prompt, max_tokens, temperature, seed):
   )
   response.raise_for_status()
   data = response.json()
-  return data["choices"][0]["text"], data.get("usage", {})
+  choice = data["choices"][0]
+  return choice["text"], data.get("usage", {}), choice.get("logprobs")
 
 
 def aggregate_records(records):
@@ -202,6 +207,14 @@ def aggregate_records(records):
     },
     "avg_prompt_tokens": 0.0,
     "avg_completion_tokens": 0.0,
+    "margin": {
+      "entity_tokens": 0,
+      "non_entity_tokens": 0,
+      "low_margin_entity_tokens": 0,
+      "low_margin_non_entity_tokens": 0,
+      "entity_margin_sum": 0.0,
+      "non_entity_margin_sum": 0.0,
+    },
   }
   for record in records:
     metrics = record["metrics"]
@@ -211,6 +224,17 @@ def aggregate_records(records):
     summary["insertions"] += metrics["insertions"]
     summary["avg_prompt_tokens"] += record["usage"].get("prompt_tokens", 0)
     summary["avg_completion_tokens"] += record["usage"].get("completion_tokens", 0)
+    margin = record["margin_summary"]
+    summary["margin"]["entity_tokens"] += margin["entity_tokens"]
+    summary["margin"]["non_entity_tokens"] += margin["non_entity_tokens"]
+    summary["margin"]["low_margin_entity_tokens"] += margin["low_margin_entity_tokens"]
+    summary["margin"]["low_margin_non_entity_tokens"] += margin["low_margin_non_entity_tokens"]
+    summary["margin"]["entity_margin_sum"] += (
+      margin["mean_entity_margin"] * margin["entity_tokens"]
+    )
+    summary["margin"]["non_entity_margin_sum"] += (
+      margin["mean_non_entity_margin"] * margin["non_entity_tokens"]
+    )
     for key, category in metrics["categories"].items():
       summary["categories"][key]["gold"] += category["gold"]
       summary["categories"][key]["errors"] += (
@@ -244,6 +268,23 @@ def aggregate_records(records):
     / summary["categories"]["negations"]["gold"]
     if summary["categories"]["negations"]["gold"] else 0.0
   )
+  summary["margin"]["low_margin_entity_rate"] = (
+    summary["margin"]["low_margin_entity_tokens"] / summary["margin"]["entity_tokens"]
+    if summary["margin"]["entity_tokens"] else 0.0
+  )
+  summary["margin"]["low_margin_non_entity_rate"] = (
+    summary["margin"]["low_margin_non_entity_tokens"]
+    / summary["margin"]["non_entity_tokens"]
+    if summary["margin"]["non_entity_tokens"] else 0.0
+  )
+  summary["margin"]["mean_entity_margin"] = (
+    summary["margin"]["entity_margin_sum"] / summary["margin"]["entity_tokens"]
+    if summary["margin"]["entity_tokens"] else 0.0
+  )
+  summary["margin"]["mean_non_entity_margin"] = (
+    summary["margin"]["non_entity_margin_sum"] / summary["margin"]["non_entity_tokens"]
+    if summary["margin"]["non_entity_tokens"] else 0.0
+  )
   return summary
 
 
@@ -255,10 +296,18 @@ def main():
   parser.add_argument("--max-tokens", type=int, default=256)
   parser.add_argument("--temperature", type=float, default=0.9)
   parser.add_argument("--seed", type=int, default=123)
+  parser.add_argument("--logprobs", type=int, default=2)
+  parser.add_argument("--low-margin-threshold", type=float, default=0.1)
+  parser.add_argument(
+    "--modes",
+    default="baseline,ears,mgsd-d0.10",
+    help="Comma-separated modes, e.g. ears,mgsd-d0.10,mgsd-d0.05",
+  )
+  parser.add_argument("--output-dir", default="/home/scd/MG-SD/entity_eval")
   parser.add_argument("--prepare-only", action="store_true")
   args = parser.parse_args()
 
-  root = Path("/home/scd/MG-SD/entity_eval")
+  root = Path(args.output_dir)
   root.mkdir(parents=True, exist_ok=True)
   dataset_path = root / "pilot_dataset.jsonl"
   dataset = prepare_dataset(
@@ -282,7 +331,8 @@ def main():
     return
 
   summaries = {}
-  for mode in ("baseline", "ears", "mgsd"):
+  modes = [mode.strip() for mode in args.modes.split(",") if mode.strip()]
+  for mode in modes:
     print(f"running_mode={mode}")
     log_path = root / f"{mode}_server.log"
     output_path = root / f"{mode}_outputs.jsonl"
@@ -292,15 +342,23 @@ def main():
       records = []
       for idx, row in enumerate(dataset, start=1):
         print(f"mode={mode} sample={idx}/{len(dataset)}")
-        output, usage = generate_one(
+        output, usage, completion_logprobs = generate_one(
           8000,
           row["prompt"],
           max_tokens=args.max_tokens,
           temperature=args.temperature,
           seed=args.seed + idx,
+          logprobs=args.logprobs,
         )
         gold_window = row["gold"][:max(len(output), 1)]
         metrics = score_entity_errors(gold_window, output, MEDICATION_LEXICON)
+        margin_rows = completion_logprobs_to_margin_rows(completion_logprobs or {})
+        tagged_margin_rows = tag_margin_rows_with_entities(
+          margin_rows, MEDICATION_LEXICON
+        )
+        margin_summary = summarize_margin_rows(
+          tagged_margin_rows, low_margin_threshold=args.low_margin_threshold
+        )
         record = {
           "note_id": row["note_id"],
           "prompt": row["prompt"],
@@ -309,6 +367,8 @@ def main():
           "output": output,
           "usage": usage,
           "metrics": metrics,
+          "margin_summary": margin_summary,
+          "margin_rows": tagged_margin_rows,
         }
         records.append(record)
       with output_path.open("w", encoding="utf-8") as handle:

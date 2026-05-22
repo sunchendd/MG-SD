@@ -1,0 +1,90 @@
+{
+  "ears": {
+    "samples": 1,
+    "gold_entities": 9,
+    "substitutions": 6,
+    "deletions": 0,
+    "insertions": 11,
+    "categories": {
+      "medications": {
+        "gold": 2,
+        "errors": 4
+      },
+      "doses": {
+        "gold": 2,
+        "errors": 8
+      },
+      "frequencies": {
+        "gold": 5,
+        "errors": 5
+      },
+      "negations": {
+        "gold": 0,
+        "errors": 0
+      }
+    },
+    "avg_prompt_tokens": 1811.0,
+    "avg_completion_tokens": 128.0,
+    "margin": {
+      "entity_tokens": 58,
+      "non_entity_tokens": 70,
+      "low_margin_entity_tokens": 5,
+      "low_margin_non_entity_tokens": 5,
+      "entity_margin_sum": 44.32721138676155,
+      "non_entity_margin_sum": 56.888095001602736,
+      "low_margin_entity_rate": 0.08620689655172414,
+      "low_margin_non_entity_rate": 0.07142857142857142,
+      "mean_entity_margin": 0.7642622652889922,
+      "mean_non_entity_margin": 0.8126870714514677
+    },
+    "ceer": 1.8888888888888888,
+    "medication_error_rate": 2.0,
+    "dose_error_rate": 4.0,
+    "frequency_error_rate": 1.0,
+    "negation_error_rate": 0.0
+  },
+  "mgsd-d0.10": {
+    "samples": 1,
+    "gold_entities": 12,
+    "substitutions": 4,
+    "deletions": 0,
+    "insertions": 2,
+    "categories": {
+      "medications": {
+        "gold": 2,
+        "errors": 1
+      },
+      "doses": {
+        "gold": 3,
+        "errors": 4
+      },
+      "frequencies": {
+        "gold": 7,
+        "errors": 1
+      },
+      "negations": {
+        "gold": 0,
+        "errors": 0
+      }
+    },
+    "avg_prompt_tokens": 1811.0,
+    "avg_completion_tokens": 128.0,
+    "margin": {
+      "entity_tokens": 41,
+      "non_entity_tokens": 87,
+      "low_margin_entity_tokens": 0,
+      "low_margin_non_entity_tokens": 2,
+      "entity_margin_sum": 36.71146244852173,
+      "non_entity_margin_sum": 80.23168344121412,
+      "low_margin_entity_rate": 0.0,
+      "low_margin_non_entity_rate": 0.022988505747126436,
+      "mean_entity_margin": 0.8954015231346764,
+      "mean_non_entity_margin": 0.9222032579449898
+    },
+    "ceer": 0.5,
+    "medication_error_rate": 0.5,
+    "dose_error_rate": 1.3333333333333333,
+    "frequency_error_rate": 0.14285714285714285,
+    "negation_error_rate": 0.0
+  }
+}

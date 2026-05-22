@@ -250,3 +250,121 @@ MG-SD vs EARS：
 - 总报告：`/home/scd/MG-SD/README.md`
 - 当前正式总结：`/home/scd/MG-SD/experiment_summary.md`
 - entity pilot 数据：`/home/scd/MG-SD/entity_eval/`
+
+## 10. 300 条 medication-heavy 大样本实验
+
+### 设置
+
+- 样本数：`300`
+- 温度：`0.9`
+- 输出长度：`256`
+- 方法：
+  - `EARS`
+  - `MG-SD δ=0.10`
+  - `MG-SD δ=0.05`
+- 额外记录：
+  - completion `logprobs`
+  - `p1 / p2 / margin`
+  - entity-token vs non-entity-token 的 low-margin 比例
+
+### 大样本结果
+
+| Method | Samples | CEER | Med Error | Dose Error | Freq Error | Negation Error |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| EARS | 300 | 0.783 | 0.793 | 0.837 | 0.697 | 1.694 |
+| MG-SD (`δ=0.10`) | 300 | 0.796 | 0.801 | 0.851 | 0.710 | 1.705 |
+| MG-SD (`δ=0.05`) | 300 | 0.795 | 0.803 | 0.849 | 0.710 | 1.743 |
+
+### 对比结论
+
+#### MG-SD (`δ=0.10`) vs EARS
+
+- CEER：**+1.58%**（更差）
+- Med Error：**+1.10%**
+- Dose Error：**+1.72%**
+- Freq Error：**+1.93%**
+- Negation Error：**+0.61%**
+
+#### MG-SD (`δ=0.05`) vs EARS
+
+- CEER：**+1.55%**（更差）
+- Med Error：**+1.28%**
+- Dose Error：**+1.44%**
+- Freq Error：**+1.82%**
+- Negation Error：**+2.86%**
+
+### Margin 机制证据
+
+当前结果**不支持**“low-margin entity tokens 更集中、MG-SD 因此修正实体错误”这个假设。
+
+#### EARS
+
+- entity low-margin rate: `0.0374`
+- non-entity low-margin rate: `0.0933`
+
+#### MG-SD (`δ=0.10`)
+
+- entity low-margin rate: `0.0387`
+- non-entity low-margin rate: `0.0923`
+
+#### MG-SD (`δ=0.05`)
+
+- entity low-margin rate: `0.0388`
+- non-entity low-margin rate: `0.0923`
+
+解释：
+
+1. 在当前这套 proxy 标注和 continuation 设置下，**low-margin token 更多出现在 non-entity tokens，而不是 entity tokens**。
+2. MG-SD 与 EARS 的 low-margin entity rate 差别也很小，没有形成强机制分离。
+3. 因此，这轮 300 条实验没有给出支持性机制证据，反而更接近**反证**。
+
+### Note-level 稳定性
+
+#### MG-SD (`δ=0.10`) vs EARS
+
+- better: `66`
+- worse: `66`
+- same: `168`
+
+#### MG-SD (`δ=0.05`) vs EARS
+
+- better: `37`
+- worse: `52`
+- same: `211`
+
+这说明：
+
+- `δ=0.10` 并不是完全失效，它在部分样本上确实有改进
+- 但总体均值上没有赢 EARS
+- 当前收益不稳定，方向还不够成立
+
+## 11. 对“测试方向是否正确”的更新判断
+
+**实验方法本身是合理的，但当前假设在这套设置下没有被数据支持。**
+
+更具体地说：
+
+1. **测试链路是对的**
+   - 先做吞吐
+   - 再做 medication-heavy entity eval
+   - 再做 `δ` ablation
+   - 再加 `p1 / p2 / margin`
+   这条方法链路没有问题。
+
+2. **但当前核心论点没有站住**
+   - 12 条 pilot 给过正向信号
+   - 300 条大样本结果反而显示 MG-SD 略差于 EARS
+   - margin 统计也没有证明 entity tokens 更 low-margin
+
+3. **所以当前结论应该调整**
+   - 不能再说“当前实验已经证明 MG-SD 比 EARS 实体错误更少”
+   - 更准确的说法是：
+     > 在小样本 pilot 中观察到正向信号，但 300 条大样本 proxy 实验未复现该优势，当前假设需要重新审视。
+
+4. **后续建议**
+   - 优先检查当前 proxy 是否足够反映真实 clinical entity risk
+   - 补真正的 token-level 对齐与人工 case 复核
+   - 考虑把分析对象从“所有 entity token”缩到“药物/剂量密集错误位置”
+   - 若仍无支持性证据，需要考虑：
+     - `margin gate` 不是有效主因
+     - 需要改成更强的 clinical backoff / token-type-aware gate

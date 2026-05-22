@@ -322,3 +322,47 @@ To make the paper claim convincing, the next experiment should:
 3. fix `δ=0.10` as the main setting and `δ=0.05` as ablation
 4. add per-token `p1 / p2 / margin` logging
 5. show that the positions corrected by MG-SD are enriched in low-margin entity tokens
+
+## 8. 300-sample medication-heavy experiment
+
+### Setup
+
+- samples: `300`
+- temperature: `0.9`
+- max_tokens: `256`
+- methods: `EARS`, `MG-SD (δ=0.10)`, `MG-SD (δ=0.05)`
+- extra logging: completion `logprobs`, `p1 / p2 / margin`
+
+### Results
+
+| Method | CEER | Med Error | Dose Error | Freq Error | Negation Error |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| EARS | 0.783 | 0.793 | 0.837 | 0.697 | 1.694 |
+| MG-SD (`δ=0.10`) | 0.796 | 0.801 | 0.851 | 0.710 | 1.705 |
+| MG-SD (`δ=0.05`) | 0.795 | 0.803 | 0.849 | 0.710 | 1.743 |
+
+### Interpretation
+
+1. The 300-sample result does **not** reproduce the positive 12-sample pilot signal.
+2. Both MG-SD variants are slightly worse than EARS on the aggregate CEER-style proxy.
+3. `δ=0.10` is marginally better than `δ=0.05`, but both remain behind EARS.
+
+### Margin evidence
+
+Current margin evidence also does **not** support the original hypothesis.
+
+| Method | Low-margin entity rate | Low-margin non-entity rate |
+| --- | ---: | ---: |
+| EARS | 0.0374 | 0.0933 |
+| MG-SD (`δ=0.10`) | 0.0387 | 0.0923 |
+| MG-SD (`δ=0.05`) | 0.0388 | 0.0923 |
+
+This means that, under the current proxy and continuation setup, low-margin tokens are **more common in non-entity tokens than in entity tokens**. That weakens the margin-gate story substantially.
+
+### Updated conclusion
+
+The experimental workflow is still correct, but the **current data does not support** the claim that MG-SD reduces entity errors relative to EARS in this setup.
+
+The right interpretation now is:
+
+> The small pilot showed a promising signal, but the 300-sample proxy experiment failed to reproduce that advantage, and the margin statistics do not support the low-margin-entity hypothesis.

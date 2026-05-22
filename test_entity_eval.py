@@ -1,12 +1,16 @@
 import sys
 import unittest
 from collections import Counter
+from math import exp
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
 
 from entity_eval import (
   build_prompt_and_gold,
+  summarize_margin_rows,
+  tag_margin_rows_with_entities,
+  completion_logprobs_to_margin_rows,
   extract_entities,
   keep_prompt_tail_with_token_limit,
   score_entity_errors,
@@ -14,6 +18,49 @@ from entity_eval import (
 
 
 class EntityEvalTests(unittest.TestCase):
+  def test_converts_completion_logprobs_into_margin_rows(self):
+    logprobs = {
+      "tokens": ["Aspirin", " 81", " mg"],
+      "token_logprobs": [-0.1, -0.2, -0.05],
+      "top_logprobs": [
+        {"Aspirin": -0.1, "Acetaminophen": -1.2},
+        {" 81": -0.2, " 325": -0.3},
+        {" mg": -0.05, " mcg": -1.0},
+      ],
+    }
+
+    rows = completion_logprobs_to_margin_rows(logprobs)
+
+    self.assertEqual(len(rows), 3)
+    self.assertEqual(rows[0]["token"], "Aspirin")
+    self.assertEqual(rows[0]["top1_token"], "Aspirin")
+    self.assertEqual(rows[0]["top2_token"], "Acetaminophen")
+    self.assertAlmostEqual(rows[0]["top1_prob"], exp(-0.1))
+    self.assertAlmostEqual(rows[0]["top2_prob"], exp(-1.2))
+    self.assertAlmostEqual(rows[0]["margin"], exp(-0.1) - exp(-1.2))
+    self.assertEqual(rows[1]["top2_token"], " 325")
+
+  def test_tags_entity_tokens_and_summarizes_low_margin_ratio(self):
+    rows = [
+      {"token": "Aspirin", "margin": 0.04},
+      {"token": " 81", "margin": 0.03},
+      {"token": " mg", "margin": 0.02},
+      {"token": " daily", "margin": 0.08},
+      {"token": " stable", "margin": 0.30},
+    ]
+
+    tagged = tag_margin_rows_with_entities(rows, {"aspirin"})
+    summary = summarize_margin_rows(tagged, low_margin_threshold=0.1)
+
+    self.assertEqual([row["entity_type"] for row in tagged],
+                     ["medication", "dose", "dose", "frequency", None])
+    self.assertEqual(summary["entity_tokens"], 4)
+    self.assertEqual(summary["non_entity_tokens"], 1)
+    self.assertEqual(summary["low_margin_entity_tokens"], 4)
+    self.assertEqual(summary["low_margin_non_entity_tokens"], 0)
+    self.assertAlmostEqual(summary["low_margin_entity_rate"], 1.0)
+    self.assertAlmostEqual(summary["low_margin_non_entity_rate"], 0.0)
+
   def test_trims_prompt_to_recent_token_budget(self):
     class FakeTokenizer:
       def encode(self, text, add_special_tokens=False):
