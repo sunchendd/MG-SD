@@ -2,6 +2,8 @@ import re
 from math import exp
 from collections import Counter
 
+from medication_lexicon import build_medication_alias_set, normalize_medication_text
+
 
 DOSE_RE = re.compile(r"\b\d+(?:\.\d+)?\s*(?:mg|mcg|g|ml|l|units?|meq|mmol)\b", re.I)
 FREQ_RE = re.compile(
@@ -142,7 +144,7 @@ def build_prompt_and_gold(note, prompt_fraction=0.4, max_gold_chars=1200):
 
 def extract_entities(text, medication_lexicon):
   norm_text = re.sub(r"\s+", " ", text).strip()
-  lower_text = norm_text.lower()
+  normalized_aliases = build_medication_alias_set(medication_lexicon)
   entities = {
     "medications": Counter(),
     "doses": Counter(m.group(0).lower() for m in DOSE_RE.finditer(norm_text)),
@@ -150,11 +152,10 @@ def extract_entities(text, medication_lexicon):
     "negations": Counter(m.group(0).lower() for m in NEG_RE.finditer(norm_text)),
   }
 
-  med_words = {word.lower() for word in medication_lexicon}
-  for token in WORD_RE.findall(lower_text):
-    if token in med_words:
+  for match in WORD_RE.finditer(norm_text):
+    token = normalize_medication_text(match.group(0))
+    if token in normalized_aliases:
       entities["medications"][token] += 1
-
   return entities
 
 

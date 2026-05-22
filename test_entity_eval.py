@@ -18,6 +18,8 @@ from entity_eval import (
 
 from run_entity_eval_pilot import dedupe_rows_by_note_prefix, is_clean_discharge_medications_section
 
+from medication_lexicon import normalize_medication_text, build_medication_alias_set
+
 
 class EntityEvalTests(unittest.TestCase):
   def test_converts_completion_logprobs_into_margin_rows(self):
@@ -154,6 +156,19 @@ class DatasetSelectionTests(unittest.TestCase):
 
     self.assertFalse(is_clean_discharge_medications_section(dirty))
     self.assertTrue(is_clean_discharge_medications_section(clean))
+
+
+class MedicationLexiconTests(unittest.TestCase):
+  def test_normalizes_parenthesized_brand_aliases(self):
+    self.assertEqual(
+      normalize_medication_text("Emtricitabine-Tenofovir (Truvada)"),
+      "emtricitabine tenofovir truvada",
+    )
+
+  def test_alias_set_contains_common_surface_forms(self):
+    aliases = build_medication_alias_set({"acetaminophen", "furosemide"})
+    self.assertIn("acetaminophen", aliases)
+    self.assertIn("furosemide", aliases)
 
 
 if __name__ == "__main__":
