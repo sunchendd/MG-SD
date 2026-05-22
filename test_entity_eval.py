@@ -16,7 +16,7 @@ from entity_eval import (
   score_entity_errors,
 )
 
-from run_entity_eval_pilot import dedupe_rows_by_note_prefix, is_clean_discharge_medications_section
+from run_entity_eval_pilot import dedupe_rows_by_note_prefix, is_clean_discharge_medications_section, select_unique_clean_rows
 
 from medication_lexicon import normalize_medication_text, build_medication_alias_set
 
@@ -156,6 +156,19 @@ class DatasetSelectionTests(unittest.TestCase):
 
     self.assertFalse(is_clean_discharge_medications_section(dirty))
     self.assertTrue(is_clean_discharge_medications_section(clean))
+
+  def test_selects_unique_prefix_rows_with_seed(self):
+    rows = [
+      {"note_id": "10000032-DS-21", "prompt": "p1", "gold": "Discharge Medications: 1. Aspirin 81 mg PO DAILY"},
+      {"note_id": "10000032-DS-22", "prompt": "p2", "gold": "Discharge Medications: 1. Furosemide 40 mg PO DAILY"},
+      {"note_id": "10000935-DS-18", "prompt": "p3", "gold": "Discharge Medications: 1. Metformin 500 mg PO BID"},
+      {"note_id": "10001884-DS-26", "prompt": "p4", "gold": "Discharge Medications: 1. Simvastatin 40 mg PO DAILY"},
+    ]
+
+    selected = select_unique_clean_rows(rows, sample_count=2, seed=123)
+
+    self.assertEqual(len(selected), 2)
+    self.assertEqual(len({row["note_id"].split("-DS-")[0] for row in selected}), 2)
 
 
 class MedicationLexiconTests(unittest.TestCase):

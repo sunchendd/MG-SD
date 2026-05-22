@@ -9,6 +9,8 @@ import subprocess
 import time
 from pathlib import Path
 
+import random
+
 
 from entity_eval import (
   build_prompt_and_gold,
@@ -45,18 +47,58 @@ SECTION_MARKERS = [
 ]
 
 
-def dedupe_rows_by_note_prefix(rows):
-  raise NotImplementedError
+NOISY_SECTION_MARKERS = (
+  "follow-up",
+  "appointment",
+  "code:",
+  "contact:",
+  "lab results",
+  "monitor clinically",
+  "acute issues",
+  "transitional issues",
+  "stopped medications",
+  "medications on admission",
+)
+
+
+def note_prefix(note_id):
+  return note_id.split("-DS-")[0]
 
 
 def is_clean_discharge_medications_section(text):
-  raise NotImplementedError
+  lower = text.lower().strip()
+  if not lower.startswith("discharge medications:"):
+    return False
+  if sum(marker in lower[:500] for marker in NOISY_SECTION_MARKERS):
+    return False
+  if len(re.findall(r"\b\d+\.\s", text[:800])) < 1:
+    return False
+  return True
 
 
+def dedupe_rows_by_note_prefix(rows):
+  seen = set()
+  deduped = []
+  for row in rows:
+    prefix = note_prefix(row["note_id"])
+    if prefix in seen:
+      continue
+    seen.add(prefix)
+    deduped.append({**row, "note_prefix": prefix})
+  return deduped
 
-def prepare_dataset(output_path, sample_count, prompt_fraction, max_gold_chars):
+
+def select_unique_clean_rows(rows, sample_count, seed):
+  clean_rows = [row for row in rows if is_clean_discharge_medications_section(row["gold"]) ]
+  deduped = dedupe_rows_by_note_prefix(clean_rows)
+  rng = random.Random(seed)
+  rng.shuffle(deduped)
+  return deduped[:sample_count]
+
+
+def prepare_dataset(output_path, sample_count, prompt_fraction, max_gold_chars, seed=123):
   source = Path("/home/scd/mimic-iv-note/note/discharge.csv.gz")
-  rows = []
+  candidates = []
   with gzip.open(source, "rt") as handle:
     reader = csv.DictReader(handle)
     for row in reader:
@@ -89,7 +131,7 @@ def prepare_dataset(output_path, sample_count, prompt_fraction, max_gold_chars):
           + sum(gold_entities["negations"].values())) < 1:
         continue
 
-      rows.append({
+      candidates.append({
         "note_id": row["note_id"],
         "prompt": prompt,
         "gold": gold,
@@ -98,9 +140,8 @@ def prepare_dataset(output_path, sample_count, prompt_fraction, max_gold_chars):
           for key, value in gold_entities.items()
         },
       })
-      if len(rows) >= sample_count:
-        break
 
+  rows = select_unique_clean_rows(candidates, sample_count=sample_count, seed=seed)
   output_path.parent.mkdir(parents=True, exist_ok=True)
   with output_path.open("w", encoding="utf-8") as handle:
     for row in rows:
