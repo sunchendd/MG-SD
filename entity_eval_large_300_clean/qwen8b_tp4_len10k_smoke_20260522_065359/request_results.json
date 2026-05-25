@@ -1,0 +1,18 @@
+{
+  "short_request": {
+    "status_code": 200,
+    "ok": true,
+    "body_excerpt": "{\"id\":\"cmpl-b48c240071f48a86\",\"object\":\"text_completion\",\"created\":1779432961,\"prompt_routed_experts\":null,\"model\":\"Qwen3-32B\",\"choices\":[{\"index\":0,\"text\":\" 1. Lisinopril (for hypertension)  \\n2. Metformin (for diabetes mellitus)  \\n3. Albuterol (for\",\"logprobs\":null,\"finish_reason\":\"length\",\"stop_reason\":null,\"token_ids\":null,\"prompt_logprobs\":null,\"prompt_token_ids\":null,\"routed_experts\":null}]"
+  },
+  "short_prompt_4k_request": {
+    "status_code": 200,
+    "ok": true,
+    "body_excerpt": "{\"id\":\"cmpl-a946066fb9832a4c\",\"object\":\"text_completion\",\"created\":1779432964,\"prompt_routed_experts\":null,\"model\":\"Qwen3-32B\",\"choices\":[{\"index\":0,\"text\":\" There are many possible discharge medications, but two common ones are:\\n- Antibiotics\\n- Pain relievers (such as acetaminophen or ibuprofen) Discharge medications can vary depending on the reason for hospitalization and the patient's specifi"
+  },
+  "dataset_prompt_4k_request": {
+    "note_id": "17021067-DS-15",
+    "status_code": 200,
+    "ok": true,
+    "body_excerpt": "{\"id\":\"cmpl-a33f6248c3170994\",\"object\":\"text_completion\",\"created\":1779433037,\"prompt_routed_experts\":null,\"model\":\"Qwen3-32B\",\"choices\":[{\"index\":0,\"text\":\" at bedtime - OxyContin 5mg bid - Dilaudid 2mg prn - Bactrim 4 tabs weekly - Flonase 1 spray bid - Zofran 4mg prn - Neurontin 100mg tid - Tussionex PRN Medications at Discharge: - All home medications continued with the exception of Dilaudid, "
+  }
+}

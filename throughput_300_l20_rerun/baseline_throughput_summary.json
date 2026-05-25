@@ -1,0 +1,12 @@
+{
+  "samples": 300,
+  "elapsed_s": 2038.0154874324799,
+  "prompt_tokens": 673427,
+  "completion_tokens": 76800,
+  "total_tokens": 750227,
+  "prompt_throughput": 330.43271955130854,
+  "output_throughput": 37.68371755444984,
+  "total_throughput": 368.1164371057584,
+  "avg_latency_s": 6.793384958108266,
+  "avg_output_tokens": 256.0
+}

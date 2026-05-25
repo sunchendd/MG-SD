@@ -16,7 +16,7 @@
 2. **实体错误上**
    - 12 条 pilot 曾出现正向信号：**MG-SD 优于 EARS**。
    - 但 300 条 medication-heavy 大样本实验没有复现这个优势。
-   - 当前 300 条结果中，**EARS 略优于 MG-SD**。
+   - baseline 补齐后，当前 300 条 aggregate proxy 排序是：**Baseline < EARS < MG-SD**。
 
 3. **机制证据上**
    - 已加 `p1 / p2 / margin` 日志。
@@ -24,7 +24,7 @@
 
 所以目前更准确的结论是：
 
-> 小样本 pilot 出现过正向信号，但 300 条大样本 proxy 实验没有复现，当前还不能直接宣称“MG-SD 比 EARS 实体错误更少”。
+> 小样本 pilot 出现过正向信号，但 300 条大样本 proxy 实验没有复现该优势；补齐 baseline 后，aggregate proxy 上甚至是 baseline 最低，因此当前还不能宣称“MG-SD 比 EARS 或 baseline 实体错误更少”。
 
 ## 2. 实验环境
 
@@ -212,25 +212,64 @@ python3 run_entity_eval_pilot.py \
 - **安全实验默认**：`δ=0.10`
 - `δ=0.20` 暂时没有表现出明显优势
 
-### 6.3 300 样本同批吞吐进展
+### 6.3 300 样本同批吞吐补跑（2xL20，256 output）
 
-目前 300 样本同批吞吐里：
+这轮补跑已经完成，统一使用同一批 cleaned 300 样本，`avg_output_tokens=256`。
 
-- EARS / MG-SD 的 server log 已经有可提取结果
-- baseline 同批补跑仍未完成
+| 方法 | Output Throughput | Total Throughput | Avg Latency | Avg Output Tokens |
+| --- | ---: | ---: | ---: | ---: |
+| Baseline | 37.68 tok/s | 368.12 tok/s | 6.79 s | 256.0 |
+| EARS | 38.60 tok/s | 377.07 tok/s | 6.63 s | 256.0 |
+| MG-SD (`δ=0.10`) | 38.34 tok/s | 374.49 tok/s | 6.68 s | 256.0 |
 
-现有 log 末尾可读到的 `Avg generation throughput`：
+相对 Baseline：
 
-| 方法 | 300 样本 log 中可提取的 Output Throughput |
-| --- | ---: |
-| EARS | 35.3 tok/s |
-| MG-SD (`δ=0.10`) | 35.4 tok/s |
-| MG-SD (`δ=0.05`) | 26.1 tok/s |
+- EARS：**+2.43% Output Throughput**，**+2.43% Avg Latency 改善**
+- MG-SD (`δ=0.10`)：**+1.73% Output Throughput**，**+1.70% Avg Latency 改善**
 
-说明：
+结论：
 
-- 这组还不是最终的 baseline / EARS / MG-SD 完整对照表
-- baseline 补跑失败的直接原因已定位为 **prompt truncation 没接上，触发 4096 context 上限**
+- 这组已经补齐了 baseline / EARS / MG-SD 的完整同批对照。
+- **EARS 是当前最稳的吞吐点**。
+- MG-SD 仍高于 baseline，但相对 EARS 有小幅回退。
+- 由于这组是**长 prompt + 单并发 + 端到端口径**，decode 侧收益被 prefill 稀释，所以增幅明显小于前面的短样本 sweep。
+
+### 6.4 4xL20 长输出吞吐（Qwen3-8B draft，10k / 4k）
+
+这轮是用户后续追加的长输出配置，已经完整跑完。
+
+- Target：`/data/models/Qwen3-32B`
+- Draft：`/data/models/Qwen3-8B`
+- GPU：`0,1,3,4`（4xL20）
+- `tensor_parallel_size=4`
+- `--max-model-len 10000`
+- `--block-size 16`
+- `--max-tokens 4000`
+- `temperature=0.9`
+- `concurrency=4`
+- 数据集：`/home/scd/MG-SD/entity_eval_large_300_clean/pilot_dataset.jsonl`
+
+| 方法 | Output Throughput | Total Throughput | Avg Latency | Avg Output Tokens | Avg Draft Accept Rate* |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Baseline | 183.56 tok/s | 281.48 tok/s | 77.91 s | 3584.17 | 64.83% |
+| EARS | 188.56 tok/s | 290.89 tok/s | 74.48 s | 3522.95 | 67.12% |
+| MG-SD (`δ=0.10`) | 186.99 tok/s | 287.70 tok/s | 75.64 s | 3550.19 | 66.83% |
+
+相对 Baseline：
+
+- EARS：**+2.72% Output Throughput**，**+3.34% Total Throughput**，**-4.40% Avg Latency**
+- MG-SD (`δ=0.10`)：**+1.87% Output Throughput**，**+2.21% Total Throughput**，**-2.91% Avg Latency**
+
+补充解释：
+
+- EARS / MG-SD 的平均输出长度略短于 baseline（`3522.95` / `3550.19` vs `3584.17`），所以看 Avg Latency 时不能只按绝对值解读。
+- 若按 `wall_clock / output_tokens` 归一化，三组约为：
+  - Baseline：`21.74 ms/token`
+  - EARS：`21.14 ms/token`
+  - MG-SD：`21.31 ms/token`
+- 归一化后仍然是 **EARS 最优，MG-SD 次之，baseline 最慢**。
+
+\* `Avg Draft Accept Rate` 来自对应 `*_server.log` 中 `SpecDecoding metrics` 的全程平均值，不是 `evalscope perf` 口径。
 
 ## 7. 实体错误评估口径
 
@@ -318,19 +357,28 @@ MG-SD 相对 EARS：
 
 | 方法 | Samples | CEER | Med Error | Dose Error | Freq Error | Negation Error |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| EARS | 300 | 0.783 | 0.793 | 0.837 | 0.697 | 1.694 |
-| MG-SD (`δ=0.10`) | 300 | 0.796 | 0.801 | 0.851 | 0.710 | 1.705 |
-| MG-SD (`δ=0.05`) | 300 | 0.795 | 0.803 | 0.849 | 0.710 | 1.743 |
+| Baseline | 300 | 0.780 | 0.766 | 0.840 | 0.701 | 1.702 |
+| EARS | 300 | 0.782 | 0.793 | 0.834 | 0.697 | 1.694 |
+| MG-SD (`δ=0.10`) | 300 | 0.808 | 0.814 | 0.858 | 0.727 | 1.682 |
+| MG-SD (`δ=0.05`) | 300 | 0.815 | 0.826 | 0.869 | 0.729 | 1.631 |
+
+相对 Baseline：
+
+- EARS：CEER **+0.25%**
+- MG-SD (`δ=0.10`)：CEER **+3.52%**
+- MG-SD (`δ=0.05`)：CEER **+4.42%**
 
 相对 EARS：
 
-- MG-SD (`δ=0.10`)：CEER **+1.58%**
-- MG-SD (`δ=0.05`)：CEER **+1.55%**
+- MG-SD (`δ=0.10`)：CEER **+3.27%**
+- MG-SD (`δ=0.05`)：CEER **+4.16%**
 
 结论：
 
 - 300 条大样本 **没有复现** 12 条 pilot 的优势
-- 当前 aggregate proxy 上，**EARS 略优于 MG-SD**
+- baseline 补齐后，当前 aggregate proxy 上是 **Baseline 最低、EARS 次之、MG-SD 最差**
+- EARS 只在 **dose / frequency / negation** 三类上略好于 baseline，但 **medication error** 反而高于 baseline
+- 两组 MG-SD 重跑后都比刚才更差，其中 `δ=0.10` 相比 EARS 在 300 条上是 **82 better / 82 worse / 136 tie**，`δ=0.05` 是 **69 better / 73 worse / 158 tie**
 
 ## 9. `p1 / p2 / margin` 机制分析
 
@@ -360,9 +408,10 @@ MG-SD 相对 EARS：
 
 | 方法 | Low-margin entity rate | Low-margin non-entity rate |
 | --- | ---: | ---: |
-| EARS | 0.0374 | 0.0933 |
-| MG-SD (`δ=0.10`) | 0.0387 | 0.0923 |
-| MG-SD (`δ=0.05`) | 0.0388 | 0.0923 |
+| Baseline | 0.0212 | 0.0827 |
+| EARS | 0.0235 | 0.0823 |
+| MG-SD (`δ=0.10`) | 0.0223 | 0.0836 |
+| MG-SD (`δ=0.05`) | 0.0229 | 0.0834 |
 
 结论：
 
@@ -384,20 +433,19 @@ MG-SD 相对 EARS：
 
 ### 10.2 当前阻塞
 
-1. **300 样本 baseline 同批吞吐还没补齐**
-   - 失败原因已定位：
-   - 某些样本 prompt 过长
-   - 补跑脚本没有复用 prompt truncation 逻辑
-   - 触发 `4096` context 上限
-
-2. **小样本和大样本结论冲突**
+1. **小样本和大样本结论冲突**
    - 12 条 pilot 是正向
    - 300 条大样本是反向
    - 当前不能直接得出论文结论
 
-3. **机制假设未被数据支持**
+2. **机制假设未被数据支持**
    - `low_margin_entity_rate` 没有高于 `low_margin_non_entity_rate`
    - 说明当前 margin-gate story 证据不足
+
+3. **长输出 4 卡结果已经补齐，但结论仍然指向 EARS 更稳**
+   - 4xL20、`Qwen3-8B` draft、`10k/4k` 已完成
+   - MG-SD 仍然高于 baseline
+   - 但当前速度和机制证据都没有超过 EARS
 
 ## 11. 结果文件
 
@@ -412,8 +460,8 @@ MG-SD 相对 EARS：
 
 如果目标是继续把论文结论做实，建议按下面顺序推进：
 
-1. 先补齐 **300 样本 baseline 同批吞吐**
-2. 对 300 条结果做 **case-level 分析**
+1. 对 300 条结果做 **case-level 分析**
+2. 单独拉出 **药物 / 剂量高密度子集** 再复核
 3. 复查当前 **proxy 是否足够反映真实 clinical entity risk**
 4. 如果 proxy 仍不稳定，再考虑：
    - 更强的实体抽取器

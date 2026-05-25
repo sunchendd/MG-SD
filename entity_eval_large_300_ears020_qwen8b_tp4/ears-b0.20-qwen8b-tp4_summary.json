@@ -1,0 +1,48 @@
+{
+  "samples": 300,
+  "gold_entities": 7294,
+  "substitutions": 2130,
+  "deletions": 1751,
+  "insertions": 1957,
+  "categories": {
+    "medications": {
+      "gold": 1563,
+      "errors": 1221
+    },
+    "doses": {
+      "gold": 2667,
+      "errors": 2322
+    },
+    "frequencies": {
+      "gold": 2961,
+      "errors": 2095
+    },
+    "negations": {
+      "gold": 103,
+      "errors": 200
+    }
+  },
+  "avg_prompt_tokens": 2244.7566666666667,
+  "avg_completion_tokens": 256.0,
+  "margin": {
+    "entity_tokens": 6003,
+    "non_entity_tokens": 70790,
+    "low_margin_entity_tokens": 131,
+    "low_margin_non_entity_tokens": 5597,
+    "entity_margin_sum": 5438.3907525133545,
+    "non_entity_margin_sum": 54399.294740553145,
+    "low_margin_entity_rate": 0.021822422122272197,
+    "low_margin_non_entity_rate": 0.07906483966661958,
+    "mean_entity_margin": 0.9059454860092211,
+    "mean_non_entity_margin": 0.7684601601999315
+  },
+  "ceer": 0.800383877159309,
+  "medication_error_rate": 0.781190019193858,
+  "dose_error_rate": 0.8706411698537683,
+  "frequency_error_rate": 0.707531239446133,
+  "negation_error_rate": 1.941747572815534,
+  "method": "ears-b0.20-qwen8b-tp4",
+  "draft_model": "/data/models/Qwen3-8B",
+  "tensor_parallel_size": 4,
+  "ears_base_tolerance": 0.2
+}

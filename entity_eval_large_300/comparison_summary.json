@@ -1,0 +1,261 @@
+{
+  "aggregate": {
+    "baseline": {
+      "samples": 300,
+      "gold_entities": 7315,
+      "substitutions": 2021,
+      "deletions": 1845,
+      "insertions": 1842,
+      "categories": {
+        "medications": {
+          "gold": 1567,
+          "errors": 1201
+        },
+        "doses": {
+          "gold": 2673,
+          "errors": 2246
+        },
+        "frequencies": {
+          "gold": 2971,
+          "errors": 2084
+        },
+        "negations": {
+          "gold": 104,
+          "errors": 177
+        }
+      },
+      "avg_prompt_tokens": 2244.7566666666667,
+      "avg_completion_tokens": 256.0,
+      "margin": {
+        "entity_tokens": 5804,
+        "non_entity_tokens": 70996,
+        "low_margin_entity_tokens": 123,
+        "low_margin_non_entity_tokens": 5872,
+        "entity_margin_sum": 5288.834986729964,
+        "non_entity_margin_sum": 54076.343443323545,
+        "low_margin_entity_rate": 0.021192281185389388,
+        "low_margin_non_entity_rate": 0.08270888500760606,
+        "mean_entity_margin": 0.9112396600155004,
+        "mean_non_entity_margin": 0.761681551683525
+      },
+      "ceer": 0.7803144224196856,
+      "medication_error_rate": 0.7664326738991704,
+      "dose_error_rate": 0.8402543958099513,
+      "frequency_error_rate": 0.7014473241332885,
+      "negation_error_rate": 1.7019230769230769
+    },
+    "ears": {
+      "samples": 300,
+      "gold_entities": 7325,
+      "substitutions": 1994,
+      "deletions": 1877,
+      "insertions": 1859,
+      "categories": {
+        "medications": {
+          "gold": 1557,
+          "errors": 1234
+        },
+        "doses": {
+          "gold": 2687,
+          "errors": 2241
+        },
+        "frequencies": {
+          "gold": 2973,
+          "errors": 2072
+        },
+        "negations": {
+          "gold": 108,
+          "errors": 183
+        }
+      },
+      "avg_prompt_tokens": 2244.7566666666667,
+      "avg_completion_tokens": 256.0,
+      "margin": {
+        "entity_tokens": 5821,
+        "non_entity_tokens": 70979,
+        "low_margin_entity_tokens": 137,
+        "low_margin_non_entity_tokens": 5840,
+        "entity_margin_sum": 5313.107572504908,
+        "non_entity_margin_sum": 54233.699673637486,
+        "low_margin_entity_rate": 0.023535475004294794,
+        "low_margin_non_entity_rate": 0.08227785683089364,
+        "mean_entity_margin": 0.9127482515899171,
+        "mean_non_entity_margin": 0.7640809207461008
+      },
+      "ceer": 0.7822525597269625,
+      "medication_error_rate": 0.7925497752087347,
+      "dose_error_rate": 0.8340156308150354,
+      "frequency_error_rate": 0.6969391187352842,
+      "negation_error_rate": 1.6944444444444444
+    },
+    "mgsd-d0.10": {
+      "samples": 300,
+      "gold_entities": 7336,
+      "substitutions": 2034,
+      "deletions": 1944,
+      "insertions": 1948,
+      "categories": {
+        "medications": {
+          "gold": 1566,
+          "errors": 1275
+        },
+        "doses": {
+          "gold": 2685,
+          "errors": 2304
+        },
+        "frequencies": {
+          "gold": 2975,
+          "errors": 2162
+        },
+        "negations": {
+          "gold": 110,
+          "errors": 185
+        }
+      },
+      "avg_prompt_tokens": 2244.7566666666667,
+      "avg_completion_tokens": 256.0,
+      "margin": {
+        "entity_tokens": 5795,
+        "non_entity_tokens": 71005,
+        "low_margin_entity_tokens": 129,
+        "low_margin_non_entity_tokens": 5939,
+        "entity_margin_sum": 5283.342887179321,
+        "non_entity_margin_sum": 53886.274977261186,
+        "low_margin_entity_rate": 0.022260569456427955,
+        "low_margin_non_entity_rate": 0.0836419970424618,
+        "mean_entity_margin": 0.9117071418773635,
+        "mean_non_entity_margin": 0.7589081751603576
+      },
+      "ceer": 0.8077971646673937,
+      "medication_error_rate": 0.814176245210728,
+      "dose_error_rate": 0.8581005586592179,
+      "frequency_error_rate": 0.7267226890756302,
+      "negation_error_rate": 1.6818181818181819
+    },
+    "mgsd-d0.05": {
+      "samples": 300,
+      "gold_entities": 7337,
+      "substitutions": 2025,
+      "deletions": 1971,
+      "insertions": 1982,
+      "categories": {
+        "medications": {
+          "gold": 1561,
+          "errors": 1290
+        },
+        "doses": {
+          "gold": 2691,
+          "errors": 2338
+        },
+        "frequencies": {
+          "gold": 2974,
+          "errors": 2169
+        },
+        "negations": {
+          "gold": 111,
+          "errors": 181
+        }
+      },
+      "avg_prompt_tokens": 2244.7566666666667,
+      "avg_completion_tokens": 256.0,
+      "margin": {
+        "entity_tokens": 5818,
+        "non_entity_tokens": 70982,
+        "low_margin_entity_tokens": 133,
+        "low_margin_non_entity_tokens": 5917,
+        "entity_margin_sum": 5299.326219243273,
+        "non_entity_margin_sum": 53887.86308976155,
+        "low_margin_entity_rate": 0.022860089377793057,
+        "low_margin_non_entity_rate": 0.08335916147755769,
+        "mean_entity_margin": 0.910850157999875,
+        "mean_non_entity_margin": 0.7591764544498824
+      },
+      "ceer": 0.8147744309663351,
+      "medication_error_rate": 0.8263933376040999,
+      "dose_error_rate": 0.8688219992567818,
+      "frequency_error_rate": 0.7293207800941492,
+      "negation_error_rate": 1.6306306306306306
+    }
+  },
+  "note_level": {
+    "ears_vs_baseline": {
+      "worse": 114,
+      "tie": 84,
+      "better": 102
+    },
+    "mgsd_d010_vs_ears": {
+      "better": 82,
+      "tie": 136,
+      "worse": 82
+    },
+    "mgsd_d005_vs_ears": {
+      "better": 69,
+      "tie": 158,
+      "worse": 73
+    }
+  },
+  "top5_mgsd_d010_better_than_ears": [
+    {
+      "note_id": "10003299-DS-8",
+      "mgsd_d010_ceer": 1.0,
+      "ears_ceer": 2.142857142857143,
+      "delta": -1.1428571428571428
+    },
+    {
+      "note_id": "10005001-DS-8",
+      "mgsd_d010_ceer": 0.7857142857142857,
+      "ears_ceer": 1.8461538461538463,
+      "delta": -1.0604395604395607
+    },
+    {
+      "note_id": "10006457-DS-14",
+      "mgsd_d010_ceer": 1.8461538461538463,
+      "ears_ceer": 2.8461538461538463,
+      "delta": -1.0
+    },
+    {
+      "note_id": "10011189-DS-12",
+      "mgsd_d010_ceer": 1.4166666666666667,
+      "ears_ceer": 2.375,
+      "delta": -0.9583333333333333
+    },
+    {
+      "note_id": "10000032-DS-21",
+      "mgsd_d010_ceer": 0.47619047619047616,
+      "ears_ceer": 1.1904761904761905,
+      "delta": -0.7142857142857143
+    }
+  ],
+  "top5_mgsd_d010_worse_than_ears": [
+    {
+      "note_id": "10011398-DS-9",
+      "mgsd_d010_ceer": 2.6923076923076925,
+      "ears_ceer": 1.0,
+      "delta": 1.6923076923076925
+    },
+    {
+      "note_id": "10010440-DS-8",
+      "mgsd_d010_ceer": 1.303030303030303,
+      "ears_ceer": 0.19444444444444445,
+      "delta": 1.1085858585858586
+    },
+    {
+      "note_id": "10002428-DS-18",
+      "mgsd_d010_ceer": 1.8235294117647058,
+      "ears_ceer": 0.7619047619047619,
+      "delta": 1.061624649859944
+    },
+    {
+      "note_id": "10009686-DS-18",
+      "mgsd_d010_ceer": 1.6666666666666667,
+      "ears_ceer": 0.7391304347826086,
+      "delta": 0.9275362318840581
+    },
+    {
+      "note_id": "10004401-DS-23",
+      "mgsd_d010_ceer": 2.1538461538461537,
+      "ears_ceer": 1.2307692307692308,
+      "delta": 0.9230769230769229
+    }
+  ]
+}

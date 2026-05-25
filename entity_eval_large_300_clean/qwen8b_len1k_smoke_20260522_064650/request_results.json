@@ -1,0 +1,18 @@
+{
+  "short_request": {
+    "status_code": 200,
+    "ok": true,
+    "body_excerpt": "{\"id\":\"cmpl-8ecb24f8d6f51f08\",\"object\":\"text_completion\",\"created\":1779432541,\"prompt_routed_experts\":null,\"model\":\"Qwen3-32B\",\"choices\":[{\"index\":0,\"text\":\" 1. Lisinopril (for hypertension)  \\n2. Metformin (for diabetes mellitus)  \\n3. Aspirin (for cardiovascular\",\"logprobs\":null,\"finish_reason\":\"length\",\"stop_reason\":null,\"token_ids\":null,\"prompt_logprobs\":null,\"prompt_token_ids\":null,\"routed_ex"
+  },
+  "short_prompt_4k_request": {
+    "status_code": 400,
+    "ok": false,
+    "body_excerpt": "{\"error\":{\"message\":\"max_tokens=4000 cannot be greater than max_model_len=max_total_tokens=1000. Please request fewer output tokens. (parameter=max_tokens, value=4000)\",\"type\":\"BadRequestError\",\"param\":\"max_tokens\",\"code\":400}}"
+  },
+  "dataset_prompt_4k_request": {
+    "note_id": "17021067-DS-15",
+    "status_code": 400,
+    "ok": false,
+    "body_excerpt": "{\"error\":{\"message\":\"max_tokens=4000 cannot be greater than max_model_len=max_total_tokens=1000. Please request fewer output tokens. (parameter=max_tokens, value=4000)\",\"type\":\"BadRequestError\",\"param\":\"max_tokens\",\"code\":400}}"
+  }
+}

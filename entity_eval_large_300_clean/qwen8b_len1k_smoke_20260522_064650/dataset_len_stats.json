@@ -1,0 +1,11 @@
+{
+  "samples": 300,
+  "min_prompt_tokens": 398,
+  "avg_prompt_tokens": 1911.95,
+  "median_prompt_tokens": 1779,
+  "p90_prompt_tokens": 3300,
+  "p95_prompt_tokens": 4007,
+  "max_prompt_tokens": 5564,
+  "gt_1000": 232,
+  "gt_900": 250
+}

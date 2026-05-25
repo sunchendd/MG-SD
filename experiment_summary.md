@@ -264,7 +264,50 @@ python3 run_entity_eval_pilot.py --sample-count 12 --max-tokens 256 --temperatur
 - **安全实验默认**：`δ=0.10`
 - `δ=0.20` 暂时没有明显优于 `δ=0.10`
 
-### 6.3 medication-section entity-error pilot
+### 6.3 300 样本同批吞吐补跑（2xL20，256 output）
+
+这轮补跑已经完成，baseline / EARS / MG-SD 三组完整对照如下：
+
+| Method | Output Throughput | Total Throughput | Avg Latency | Avg Output Tokens |
+| --- | ---: | ---: | ---: | ---: |
+| Baseline | 37.68 tok/s | 368.12 tok/s | 6.79 s | 256.0 |
+| EARS | 38.60 tok/s | 377.07 tok/s | 6.63 s | 256.0 |
+| MG-SD (`δ=0.10`) | 38.34 tok/s | 374.49 tok/s | 6.68 s | 256.0 |
+
+对比结论：
+
+- EARS vs Baseline：**+2.43% Output Throughput**
+- MG-SD (`δ=0.10`) vs Baseline：**+1.73%**
+- 这组是**长 prompt + 单并发 + 端到端口径**，所以 speculative decode 收益被 prefill 稀释，EARS / MG-SD 的增益都比短样本 sweep 更小。
+
+### 6.4 4xL20 长输出吞吐（Qwen3-8B draft，10k / 4k）
+
+这轮长输出 benchmark 已跑完，启动参数已在 `*_server.log` 中确认：
+- target：`/data/models/Qwen3-32B`
+- draft：`/data/models/Qwen3-8B`
+- `tensor_parallel_size=4`
+- `--max-model-len 10000`
+- `--block-size 16`
+- `--max-tokens 4000`
+- `temperature=0.9`
+- `concurrency=4`
+
+| Method | Output Throughput | Total Throughput | Avg Latency | Avg Output Tokens | Avg Draft Accept Rate* |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Baseline | 183.56 tok/s | 281.48 tok/s | 77.91 s | 3584.17 | 64.83% |
+| EARS | 188.56 tok/s | 290.89 tok/s | 74.48 s | 3522.95 | 67.12% |
+| MG-SD (`δ=0.10`) | 186.99 tok/s | 287.70 tok/s | 75.64 s | 3550.19 | 66.83% |
+
+对比结论：
+
+- EARS vs Baseline：**+2.72% Output Throughput**，**+3.34% Total Throughput**，**-4.40% Avg Latency**
+- MG-SD (`δ=0.10`) vs Baseline：**+1.87% Output Throughput**，**+2.21% Total Throughput**，**-2.91% Avg Latency**
+- MG-SD 相比 EARS 仍有小幅回退（Output Throughput **-0.83%**）。
+- 虽然 EARS / MG-SD 的平均输出长度略短于 baseline，但按 `wall_clock / output_tokens` 归一化后，EARS 仍然最佳，MG-SD 次之。
+
+\* `Avg Draft Accept Rate` 来自对应 `*_server.log` 中 `SpecDecoding metrics` 的全程平均值，不是 `evalscope perf` 口径。
+
+### 6.5 medication-section entity-error pilot
 
 | Method | Samples | Gold Entities | CEER | Med Error | Dose Error | Freq Error | Negation Error |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
@@ -293,18 +336,19 @@ MG-SD vs EARS：
 
 1. **工程层面**
    - GPU 版 MG-SD 已经跑通
-   - `temperature=0.9` 下，MG-SD 相比 baseline 仍保留明确吞吐收益
-   - `δ=0.10` 适合作为当前医疗安全 pilot 的主参数
+   - `2xL20` 的 300 样本补跑和 `4xL20 + Qwen3-8B draft + 10k/4k` 长输出 benchmark 都已完成
+   - 当前吞吐关系很稳定：**EARS > MG-SD > baseline**
 
 2. **实验层面**
-   - 当前方向总体是**正确的**
-   - 先用吞吐验证 `baseline / EARS / MG-SD` 的速度关系，再用 medication-section pilot 看实体错误，逻辑是对的
-   - 目前已经拿到一个正向信号：**MG-SD 相比 EARS 的实体错误 proxy 更低**
+   - 测试链路本身是合理的：先吞吐，再 entity eval，再做 `δ` ablation 和 `margin` 分析
+   - 但当前实体错误结论已经从“pilot 正向”变成了“300 条大样本未复现”
+   - baseline 补齐后，aggregate proxy 排序进一步变成 **Baseline < EARS < MG-SD**
+   - 因此现阶段不能把 MG-SD 写成“已证明优于 EARS”
 
 3. **当前证据强度**
-   - 现在的 entity 结果是 **pilot 级别**
-   - 它能支持“MG-SD 有希望降低实体错误”的方向判断
-   - 但还不能单靠这 12 条 + regex proxy 就作为最终论文结论
+   - 吞吐证据已经够稳定
+   - 但安全性证据不足，`margin gate` 的机制假设也没有被当前统计支持
+   - 更准确的表述应是：**MG-SD 目前保留了相对 baseline 的加速收益，但尚未证明其相对 EARS 的实体错误优势；补齐 baseline 后，aggregate proxy 上甚至不是最优**
 
 ## 8. 测试方向是否正确
 
@@ -346,6 +390,7 @@ MG-SD vs EARS：
 - 温度：`0.9`
 - 输出长度：`256`
 - 方法：
+  - `Baseline`
   - `EARS`
   - `MG-SD δ=0.10`
   - `MG-SD δ=0.05`
@@ -358,27 +403,36 @@ MG-SD vs EARS：
 
 | Method | Samples | CEER | Med Error | Dose Error | Freq Error | Negation Error |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| EARS | 300 | 0.783 | 0.793 | 0.837 | 0.697 | 1.694 |
-| MG-SD (`δ=0.10`) | 300 | 0.796 | 0.801 | 0.851 | 0.710 | 1.705 |
-| MG-SD (`δ=0.05`) | 300 | 0.795 | 0.803 | 0.849 | 0.710 | 1.743 |
+| Baseline | 300 | 0.780 | 0.766 | 0.840 | 0.701 | 1.702 |
+| EARS | 300 | 0.782 | 0.793 | 0.834 | 0.697 | 1.694 |
+| MG-SD (`δ=0.10`) | 300 | 0.808 | 0.814 | 0.858 | 0.727 | 1.682 |
+| MG-SD (`δ=0.05`) | 300 | 0.815 | 0.826 | 0.869 | 0.729 | 1.631 |
 
 ### 对比结论
 
+#### EARS vs Baseline
+
+- CEER：**+0.25%**（更差）
+- Med Error：**+3.41%**
+- Dose Error：**-0.74%**
+- Freq Error：**-0.64%**
+- Negation Error：**-0.44%**
+
 #### MG-SD (`δ=0.10`) vs EARS
 
-- CEER：**+1.58%**（更差）
-- Med Error：**+1.10%**
-- Dose Error：**+1.72%**
-- Freq Error：**+1.93%**
-- Negation Error：**+0.61%**
+- CEER：**+3.27%**（更差）
+- Med Error：**+2.73%**
+- Dose Error：**+2.89%**
+- Freq Error：**+4.27%**
+- Negation Error：**-0.75%**
 
 #### MG-SD (`δ=0.05`) vs EARS
 
-- CEER：**+1.55%**（更差）
-- Med Error：**+1.28%**
-- Dose Error：**+1.44%**
-- Freq Error：**+1.82%**
-- Negation Error：**+2.86%**
+- CEER：**+4.16%**（更差）
+- Med Error：**+4.27%**
+- Dose Error：**+4.17%**
+- Freq Error：**+4.65%**
+- Negation Error：**-3.77%**
 
 ### Margin 机制证据
 
@@ -386,18 +440,18 @@ MG-SD vs EARS：
 
 #### EARS
 
-- entity low-margin rate: `0.0374`
-- non-entity low-margin rate: `0.0933`
+- entity low-margin rate: `0.0235`
+- non-entity low-margin rate: `0.0823`
 
 #### MG-SD (`δ=0.10`)
 
-- entity low-margin rate: `0.0387`
-- non-entity low-margin rate: `0.0923`
+- entity low-margin rate: `0.0223`
+- non-entity low-margin rate: `0.0836`
 
 #### MG-SD (`δ=0.05`)
 
-- entity low-margin rate: `0.0388`
-- non-entity low-margin rate: `0.0923`
+- entity low-margin rate: `0.0229`
+- non-entity low-margin rate: `0.0834`
 
 解释：
 
@@ -407,22 +461,29 @@ MG-SD vs EARS：
 
 ### Note-level 稳定性
 
+#### EARS vs Baseline
+
+- better: `102`
+- worse: `114`
+- same: `84`
+
 #### MG-SD (`δ=0.10`) vs EARS
 
-- better: `66`
-- worse: `66`
-- same: `168`
+- better: `82`
+- worse: `82`
+- same: `136`
 
 #### MG-SD (`δ=0.05`) vs EARS
 
-- better: `37`
-- worse: `52`
-- same: `211`
+- better: `69`
+- worse: `73`
+- same: `158`
 
 这说明：
 
+- baseline 补齐后可以看到：**EARS 并不是 aggregate proxy 最优，只是在部分类别上略优于 baseline**
 - `δ=0.10` 并不是完全失效，它在部分样本上确实有改进
-- 但总体均值上没有赢 EARS
+- 但总体均值上没有赢 EARS，而且这次重跑后差距比上一版更大
 - 当前收益不稳定，方向还不够成立
 
 ## 11. 对“测试方向是否正确”的更新判断

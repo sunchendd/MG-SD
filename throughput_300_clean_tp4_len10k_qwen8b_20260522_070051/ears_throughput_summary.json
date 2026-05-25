@@ -1,0 +1,18 @@
+{
+  "samples": 300,
+  "elapsed_seconds": 5605.157540559769,
+  "avg_latency_seconds": 74.47696932713191,
+  "p50_latency_seconds": 73.81428813934326,
+  "p90_latency_seconds": 101.1107234954834,
+  "p95_latency_seconds": 106.37924575805664,
+  "avg_prompt_tokens": 1911.95,
+  "avg_completion_tokens": 3522.9533333333334,
+  "output_throughput": 188.55598479654012,
+  "total_throughput": 290.8876312934409,
+  "total_prompt_tokens": 573585,
+  "total_completion_tokens": 1056886,
+  "finish_reasons": {
+    "length": 223,
+    "stop": 77
+  }
+}
