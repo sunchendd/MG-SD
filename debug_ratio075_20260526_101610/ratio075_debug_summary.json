@@ -1,0 +1,45 @@
+{
+  "samples": 50,
+  "gold_entities": 1187,
+  "substitutions": 344,
+  "deletions": 278,
+  "insertions": 309,
+  "categories": {
+    "medications": {
+      "gold": 246,
+      "errors": 174
+    },
+    "doses": {
+      "gold": 411,
+      "errors": 363
+    },
+    "frequencies": {
+      "gold": 514,
+      "errors": 353
+    },
+    "negations": {
+      "gold": 16,
+      "errors": 41
+    }
+  },
+  "avg_prompt_tokens": 2425.4,
+  "avg_completion_tokens": 256.0,
+  "margin": {
+    "entity_tokens": 0,
+    "non_entity_tokens": 0,
+    "low_margin_entity_tokens": 0,
+    "low_margin_non_entity_tokens": 0,
+    "entity_margin_sum": 0.0,
+    "non_entity_margin_sum": 0.0,
+    "low_margin_entity_rate": 0.0,
+    "low_margin_non_entity_rate": 0.0,
+    "mean_entity_margin": 0.0,
+    "mean_non_entity_margin": 0.0
+  },
+  "ceer": 0.7843302443133952,
+  "medication_error_rate": 0.7073170731707317,
+  "dose_error_rate": 0.8832116788321168,
+  "frequency_error_rate": 0.6867704280155642,
+  "negation_error_rate": 2.5625,
+  "method": "ratio075_debug_50"
+}

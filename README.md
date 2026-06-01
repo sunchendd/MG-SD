@@ -271,6 +271,66 @@ python3 run_entity_eval_pilot.py \
 
 \* `Avg Draft Accept Rate` 来自对应 `*_server.log` 中 `SpecDecoding metrics` 的全程平均值，不是 `evalscope perf` 口径。
 
+### 6.5 v5 吞吐回退实验补充（8 prompt / 4k output）
+
+这部分补充 v5 之后为追回 acceptance / throughput 做的几组回退实验。  
+注意：这组和 6.4 的 300 样本长输出口径不同，更接近固定负载下的 decode 吞吐对比。
+
+| 方法 | Output Throughput | Total Throughput | TPOT | Avg Draft Accept Rate |
+| --- | ---: | ---: | ---: | ---: |
+| Baseline | 160.71 tok/s | 200.89 tok/s | 24.73 ms | - |
+| EARS | 168.89 tok/s | 211.12 tok/s | 20.36 ms | 66.98% |
+| MG-SD v5 | 108.37 tok/s | 135.47 tok/s | 27.22 ms | 58.10% |
+| MG-SD v5 `risk_only` | 159.77 tok/s | 199.71 tok/s | 21.94 ms | 77.11% |
+| MG-SD v5 `ratio075` | 133.53 tok/s | 166.91 tok/s | 23.05 ms | 70.62% |
+| MG-SD soft sweep `A` | 146.10 tok/s | 182.62 tok/s | 23.35 ms | 70.43% |
+
+相对 Baseline：
+
+- MG-SD v5 `risk_only`：**-0.59% Output Throughput**
+- MG-SD v5 `ratio075`：**-16.92%**
+- MG-SD soft sweep `A`：**-9.09%**
+
+相对 MG-SD v5：
+
+- MG-SD v5 `risk_only`：**+47.42% Output Throughput**
+- MG-SD v5 `ratio075`：**+23.21%**
+- MG-SD soft sweep `A`：**+34.81%**
+
+结论：
+
+- `risk_only` 基本把吞吐追回到 baseline 附近，但它后面的 300 条 CEER 没有保住 v5 的质量优势。
+- `ratio075` 和 `A` 都能把 acceptance 拉回去一截，但速度仍明显低于 baseline / EARS。
+- 这几组结果说明：**全局放松 gate 确实能追回吞吐，但会把质量又推回到 EARS 附近甚至更差。**
+
+### 6.6 v6 条件化 gate 吞吐补充
+
+v6 的思路是：**风险 token 继续严卡，非风险 token 单独放宽**。  
+当前已经补跑完两组吞吐结果：
+
+| 方法 | Output Throughput | Total Throughput | TPOT | Avg Draft Accept Rate |
+| --- | ---: | ---: | ---: | ---: |
+| Baseline | 160.71 tok/s | 200.89 tok/s | 24.73 ms | - |
+| EARS | 168.89 tok/s | 211.12 tok/s | 20.36 ms | 66.98% |
+| v6_b | 174.18 tok/s | 217.73 tok/s | 22.35 ms | 76.35% |
+| v6_c | 177.18 tok/s | 221.48 tok/s | 20.76 ms | 82.36% |
+
+相对 Baseline：
+
+- v6_b：**+8.38% Output Throughput**
+- v6_c：**+10.25%**
+
+相对 EARS：
+
+- v6_b：**+3.13% Output Throughput**
+- v6_c：**+4.91%**
+
+结论：
+
+- **v6 已经把吞吐追回并超过 EARS**。
+- 当前吞吐最好的点是 `v6_c`，同时 acceptance 也最高。
+- 但这两组目前还**没有补 300 条 entity eval**，所以暂时只能说“速度最好”，还不能说“整体最好”。
+
 ## 7. 实体错误评估口径
 
 当前“实体错误”不是人工标注金标准，而是 **regex + lexicon 的 proxy**。
@@ -380,6 +440,41 @@ MG-SD 相对 EARS：
 - EARS 只在 **dose / frequency / negation** 三类上略好于 baseline，但 **medication error** 反而高于 baseline
 - 两组 MG-SD 重跑后都比刚才更差，其中 `δ=0.10` 相比 EARS 在 300 条上是 **82 better / 82 worse / 136 tie**，`δ=0.05` 是 **69 better / 73 worse / 158 tie**
 
+### 8.3 `Qwen3-8B` + draft-conditioned 公式补充结果
+
+这部分补充 v5 以及后续几组回退实验的实体结果。
+
+#### 8.3.1 300 条 full eval
+
+| 方法 | Samples | CEER | Med Error | Dose Error | Freq Error | Negation Error |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| Baseline | 300 | 0.780 | 0.766 | 0.840 | 0.701 | 1.702 |
+| EARS 0.20 + 8B + TP4 | 300 | 0.800 | 0.781 | 0.871 | 0.708 | 1.942 |
+| MG-SD v5 | 300 | 0.789 | 0.767 | 0.850 | 0.697 | 2.155 |
+| MG-SD v5 `risk_only` | 300 | 0.801 | 0.782 | 0.864 | 0.715 | 1.905 |
+
+结论：
+
+- **v5 已经明显优于旧 MG-SD 和同配置 EARS**，但还没有压过 baseline。
+- `risk_only` 把 negation 从 `2.155` 拉回到 `1.905`，但 medication / dose / frequency 都回退，最终 CEER 又回到 **EARS 附近**。
+- 这说明 v5 的收益主要来自 **正确修正 gate 对象**，不是单纯把 gate 放松或只在风险 token 上开洞。
+
+#### 8.3.2 pilot100 快速筛选结果
+
+| 方法 | Samples | CEER | Med Error | Dose Error | Freq Error | Negation Error |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| Baseline | 100 | 0.756 | 0.749 | 0.818 | 0.682 | 1.412 |
+| EARS | 100 | 0.776 | 0.726 | 0.878 | 0.678 | 1.848 |
+| MG-SD v5 | 100 | 0.782 | 0.733 | 0.861 | 0.685 | 2.364 |
+| Soft sweep `A` | 100 | 0.792 | 0.719 | 0.874 | 0.702 | 2.394 |
+| `ratio075` | 100 | 0.814 | 0.753 | 0.890 | 0.726 | 2.314 |
+
+结论：
+
+- `A` 相比 pilot100 上的 v5 **没有继续改善 CEER**。
+- `ratio075` 在 pilot100 上是这几组里最差的一档，不适合作为默认放松方向。
+- 这组 quick filter 的意义主要是筛掉明显不好的回退策略，不应替代 300 条 full eval。
+
 ## 9. `p1 / p2 / margin` 机制分析
 
 这部分是**机制指标**，不是实体错误本身。
@@ -430,22 +525,40 @@ MG-SD 相对 EARS：
 - 300 条大样本 entity experiment
 - `p1 / p2 / margin` 日志链路
 - 实体错误 proxy 说明文档
+- v5 draft-conditioned gate 公式验证
+- `risk_only` / `ratio075` / soft sweep 回退实验
+- v6 条件化 gate 吞吐补跑
+
+当前阶段可以更准确地概括为：
+
+1. **旧 MG-SD 的根因已经定位清楚**
+   - 问题不只是 draft 模型太弱
+   - 而是 gate 看的对象不对
+2. **v5 已经证明“公式修正有效”**
+   - 300 条 full eval 上优于旧 MG-SD，也优于同配置 EARS
+   - 但仍略差于 baseline
+3. **v6 已经把吞吐追回到当前最好**
+   - 目前吞吐已经超过 EARS
+   - 但质量侧还缺最终补跑
 
 ### 10.2 当前阻塞
 
-1. **小样本和大样本结论冲突**
-   - 12 条 pilot 是正向
-   - 300 条大样本是反向
-   - 当前不能直接得出论文结论
+1. **v6 还缺 300 条 entity eval**
+   - 现在已经能说“v6 吞吐最好”
+   - 但还不能说“v6 同时兼顾质量和速度”
 
-2. **机制假设未被数据支持**
-   - `low_margin_entity_rate` 没有高于 `low_margin_non_entity_rate`
-   - 说明当前 margin-gate story 证据不足
+2. **简单放松 gate 的路线已经基本证伪**
+   - `risk_only`、`ratio075`、soft sweep 都能把 acceptance 拉回去
+   - 但 CEER 会回退到 EARS 附近甚至更差
 
-3. **长输出 4 卡结果已经补齐，但结论仍然指向 EARS 更稳**
-   - 4xL20、`Qwen3-8B` draft、`10k/4k` 已完成
-   - MG-SD 仍然高于 baseline
-   - 但当前速度和机制证据都没有超过 EARS
+3. **当前剩余短板仍集中在 negation / dose**
+   - v5 虽然整体 CEER 改善
+   - 但 negation 仍明显高于 baseline
+   - 一旦继续放松 gate，dose / unit / negation 很容易重新恶化
+
+4. **机制证据仍需要更强支撑**
+   - 当前 `low-margin entity` 假设证据仍偏弱
+   - 后续更适合围绕 risk token / draft-conditioned gate 叙事，而不是继续强调全局 margin story
 
 ## 11. 结果文件
 
@@ -455,19 +568,33 @@ MG-SD 相对 EARS：
 - 温度 0.9：`/home/scd/MG-SD/temp09/evalscope/`
 - 12 条 entity pilot：`/home/scd/MG-SD/entity_eval/`
 - 300 条大样本：`/home/scd/MG-SD/entity_eval_large_300/`
+- v5 300 条结果：`/home/scd/MG-SD/entity_eval_large_300_mgsd020_qwen8b_tp4_v5/`
+- v5 `risk_only` 300 条结果：`/home/scd/MG-SD/entity_eval_large_300_mgsd020_qwen8b_tp4_v5_risk_only/`
+- `ratio075` pilot100：`/home/scd/MG-SD/entity_eval_ratio075_pilot100_20260526_092232/`
+- v5 长输出吞吐：`/home/scd/MG-SD/throughput_compare_20260525_124016/`
+- `risk_only` 吞吐：`/home/scd/MG-SD/throughput_risk_only_20260526_020252/`
+- `ratio075` 吞吐：`/home/scd/MG-SD/throughput_ratio075_20260526_090302/`
+- soft sweep：`/home/scd/MG-SD/soft_sweep_20260526_103027/`
+- v6 吞吐：`/home/scd/MG-SD/v6_sweep_20260529_062343/`
 
 ## 12. 当前建议
 
 如果目标是继续把论文结论做实，建议按下面顺序推进：
 
-1. 对 300 条结果做 **case-level 分析**
-2. 单独拉出 **药物 / 剂量高密度子集** 再复核
-3. 复查当前 **proxy 是否足够反映真实 clinical entity risk**
-4. 如果 proxy 仍不稳定，再考虑：
+1. 先补 **v6_b / v6_c 的 300 条 entity eval**
+2. 如果 v6 质量仍回退，就继续只调 **risk path**
+   - 优先收紧 `negation / numeric / unit`
+   - 不要再做全局放松
+3. 扩充 **多 token 风险词覆盖**
+   - 尤其是单位、频次、否定短语
+4. 对 v6 做 **case-level 分析**
+   - 看它追回吞吐时，具体放回来了哪些 token
+   - 确认是不是主要集中在 non-risk token
+5. 如果 proxy 仍不稳定，再考虑：
    - 更强的实体抽取器
-   - 更严格的 medication/dose 子集
+   - 更严格的 medication / dose 子集
    - 更贴近临床风险的 gate 设计
 
 当前最稳妥的表述是：
 
-> MG-SD 在吞吐上仍保留相对 baseline 的收益，但在当前 300 条 proxy 实验中，没有证明其相对 EARS 的实体错误优势。
+> MG-SD 已经在 v5 证明“公式修正能改善实体错误”，最新 v6 也已经把吞吐追回并超过 EARS；但在补完 v6 的 300 条 entity eval 之前，还不能宣称它同时优于 EARS 和 baseline。
