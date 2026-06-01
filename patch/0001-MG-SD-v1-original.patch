@@ -1,0 +1,114 @@
+From f2c5c1d38afd4dd4608fd485fbc4c6efd5be4f82 Mon Sep 17 00:00:00 2001
+From: sunchendd <sunchendong@kunlunit.com>
+Date: Thu, 21 May 2026 04:00:42 +0000
+Subject: [PATCH 1/3] MG-SD v1
+
+---
+ v1/sample/rejection_sampler.py | 52 ++++++++++++++++++++++++++++++++++
+ 1 file changed, 52 insertions(+)
+
+diff --git a/v1/sample/rejection_sampler.py b/v1/sample/rejection_sampler.py
+index 678654c..93a65db 100644
+--- a/v1/sample/rejection_sampler.py
++++ b/v1/sample/rejection_sampler.py
+@@ -3,6 +3,7 @@
+ 
+ from __future__ import annotations
+ 
++import os
+ from collections.abc import Sequence
+ from dataclasses import replace
+ from typing import TYPE_CHECKING
+@@ -27,6 +28,23 @@ if TYPE_CHECKING:
+ 
+ logger = init_logger(__name__)
+ 
++EARS_BASE_TOLERANCE = float(os.environ.get("VLLM_EARS_BASE_TOLERANCE", "0.0"))
++MGSD_ENABLED = os.environ.get("VLLM_MGSD_ENABLED", "0").lower() in (
++    "1",
++    "true",
++    "yes",
++)
++MGSD_MARGIN_DELTA = float(os.environ.get("VLLM_MGSD_MARGIN_DELTA", "0.0"))
++if EARS_BASE_TOLERANCE > 0:
++    if MGSD_ENABLED and MGSD_MARGIN_DELTA > 0:
++        logger.info(
++            "MG-SD enabled with base_tolerance=%.3f margin_delta=%.3f",
++            EARS_BASE_TOLERANCE,
++            MGSD_MARGIN_DELTA,
++        )
++    else:
++        logger.info("EARS enabled with base_tolerance=%.3f", EARS_BASE_TOLERANCE)
++
+ PLACEHOLDER_TOKEN_ID: tl.constexpr = -1
+ GREEDY_TEMPERATURE: tl.constexpr = 0
+ # Maximum number of speculative draft tokens allowed per request in a single
+@@ -469,6 +487,16 @@ def rejection_sample(
+     target_probs = target_logits.softmax(dim=-1, dtype=torch.float32)
+     assert target_probs.is_contiguous()
+ 
++    target_top2_probs = None
++    max_target_probs = None
++    target_margins = None
++    ears_enabled = EARS_BASE_TOLERANCE > 0
++    mgsd_enabled = ears_enabled and MGSD_ENABLED and MGSD_MARGIN_DELTA > 0
++    if ears_enabled:
++        target_top2_probs = target_probs.topk(k=2, dim=-1).values
++        max_target_probs = target_top2_probs[:, 0]
++        target_margins = target_top2_probs[:, 0] - target_top2_probs[:, 1]
++
+     # Sample recovered tokens for each position.
+     # [num_tokens]
+     recovered_token_ids = sample_recovered_tokens(
+@@ -497,8 +525,14 @@ def rejection_sample(
+         max_spec_len,
+         vocab_size,
+         synthetic_conditional_rates,
++        max_target_probs,
++        target_margins,
++        EARS_BASE_TOLERANCE,
++        MGSD_MARGIN_DELTA,
+         NO_DRAFT_PROBS=draft_probs is None,
+         SYNTHETIC_MODE=synthetic_mode,
++        EARS_ENABLED=ears_enabled,
++        MGSD_ENABLED=mgsd_enabled,
+     )
+     return output_token_ids
+ 
+@@ -772,8 +806,14 @@ def rejection_random_sample_kernel(
+     max_spec_len,
+     vocab_size,
+     synthetic_conditional_rates_ptr,  # [num_speculative_tokens] or None
++    max_target_probs_ptr,  # [num_tokens] or None
++    target_margins_ptr,  # [num_tokens] or None
++    ears_base_tolerance,
++    mgsd_margin_delta,
+     NO_DRAFT_PROBS: tl.constexpr,
+     SYNTHETIC_MODE: tl.constexpr,
++    EARS_ENABLED: tl.constexpr,
++    MGSD_ENABLED: tl.constexpr,
+ ):
+     req_idx = tl.program_id(0)
+     is_greedy = tl.load(is_greedy_ptr + req_idx)
+@@ -808,6 +848,18 @@ def rejection_random_sample_kernel(
+                 # NOTE(woosuk): While the draft probability should never be 0,
+                 # we check it to avoid NaNs. If it happens to be 0, we reject.
+                 accepted = draft_prob > 0 and target_prob / draft_prob >= uniform_prob
++                if EARS_ENABLED and not accepted and draft_prob > 0:
++                    ratio = target_prob / draft_prob
++                    max_target_prob = tl.load(max_target_probs_ptr + start_idx + pos)
++                    tolerance = ears_base_tolerance * (1.0 - max_target_prob)
++                    if MGSD_ENABLED:
++                        margin = tl.load(target_margins_ptr + start_idx + pos)
++                        tolerance = tl.where(
++                            margin > mgsd_margin_delta,
++                            tolerance,
++                            0.0,
++                        )
++                    accepted = ratio >= (uniform_prob - tolerance)
+             if accepted:
+                 token_id = draft_token_id
+             else:
+-- 
+2.34.1
+
