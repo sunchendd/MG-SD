@@ -1,0 +1,230 @@
+From 18abf1132fcff8c6897c6d191c71691f94c198e7 Mon Sep 17 00:00:00 2001
+From: sunchendd <sunchendong@kunlunit.com>
+Date: Fri, 19 Jun 2026 10:12:25 +0000
+Subject: [PATCH] feat: add MG-SD v6 conditional gate
+
+Save the conditional v6 gate that keeps stricter risk-token filtering while relaxing the non-risk path separately.
+
+Co-authored-by: Copilot <223556219+Copilot@users.noreply.github.com>
+---
+ v1/sample/rejection_sampler.py | 180 +++++++++++++++++++++++----------
+ 1 file changed, 125 insertions(+), 55 deletions(-)
+
+diff --git a/v1/sample/rejection_sampler.py b/v1/sample/rejection_sampler.py
+index df8f8a8..0582b27 100644
+--- a/v1/sample/rejection_sampler.py
++++ b/v1/sample/rejection_sampler.py
+@@ -113,6 +113,16 @@ MGSD_SOFT_TAU = _parse_float_env("VLLM_MGSD_SOFT_TAU", "0.03")
+ MGSD_DRAFT_MIN_RATIO = _parse_float_env("VLLM_MGSD_DRAFT_MIN_RATIO", "0.85")
+ MGSD_RATIO_TAU = _parse_float_env("VLLM_MGSD_RATIO_TAU", "0.05")
+ MGSD_RISK_ONLY = _parse_bool_env("VLLM_MGSD_RISK_ONLY", False)
++MGSD_V6_ENABLED = _parse_bool_env("VLLM_MGSD_V6_ENABLED", False)
++MGSD_V6_SAFE_FLOOR = _parse_float_env("VLLM_MGSD_V6_SAFE_FLOOR", "0.75")
++MGSD_V6_DELTA_SAFE = _parse_float_env("VLLM_MGSD_V6_DELTA_SAFE", "-0.02")
++MGSD_V6_TAU_M_SAFE = _parse_float_env("VLLM_MGSD_V6_TAU_M_SAFE", "0.05")
++MGSD_V6_RHO_SAFE = _parse_float_env("VLLM_MGSD_V6_RHO_SAFE", "0.75")
++MGSD_V6_TAU_R_SAFE = _parse_float_env("VLLM_MGSD_V6_TAU_R_SAFE", "0.12")
++MGSD_V6_DELTA_RISK = _parse_float_env("VLLM_MGSD_V6_DELTA_RISK", "0.00")
++MGSD_V6_TAU_M_RISK = _parse_float_env("VLLM_MGSD_V6_TAU_M_RISK", "0.03")
++MGSD_V6_RHO_RISK = _parse_float_env("VLLM_MGSD_V6_RHO_RISK", "0.85")
++MGSD_V6_TAU_R_RISK = _parse_float_env("VLLM_MGSD_V6_TAU_R_RISK", "0.05")
+ MGSD_NEGATION_BACKOFF = _parse_float_env("VLLM_MGSD_NEGATION_BACKOFF", "1.0")
+ MGSD_NUMERIC_BACKOFF = _parse_float_env("VLLM_MGSD_NUMERIC_BACKOFF", "1.0")
+ MGSD_UNIT_BACKOFF = _parse_float_env("VLLM_MGSD_UNIT_BACKOFF", "1.0")
+@@ -133,7 +143,7 @@ if EARS_BASE_TOLERANCE > 0:
+             (
+                 "MG-SD enabled with base_tolerance=%.3f margin_delta=%.3f "
+                 "soft_tau=%.3f draft_min_ratio=%.3f ratio_tau=%.3f "
+-                "risk_only=%s debug_log=%s debug_max_rows=%d "
++                "risk_only=%s v6=%s debug_log=%s debug_max_rows=%d "
+                 "risk_backoff(neg=%.2f,num=%.2f,unit=%.2f,freq=%.2f,med=%.2f)"
+             ),
+             EARS_BASE_TOLERANCE,
+@@ -142,6 +152,7 @@ if EARS_BASE_TOLERANCE > 0:
+             MGSD_DRAFT_MIN_RATIO,
+             MGSD_RATIO_TAU,
+             MGSD_RISK_ONLY,
++            MGSD_V6_ENABLED,
+             bool(MGSD_DEBUG_LOG_PATH),
+             MGSD_DEBUG_MAX_ROWS,
+             MGSD_NEGATION_BACKOFF,
+@@ -898,63 +909,122 @@ def rejection_sample(
+                 torch.zeros_like(target_draft_probs),
+             )
+             risk_mask = _build_risk_mask(draft_token_ids)
+-            margin_gate = torch.sigmoid(
+-                draft_margins.sub(MGSD_MARGIN_DELTA).div(MGSD_SOFT_TAU)
+-            )
+-            ratio_gate = torch.sigmoid(
+-                draft_to_top1_ratio.sub(MGSD_DRAFT_MIN_RATIO).div(MGSD_RATIO_TAU)
+-            )
+-            gate_scale = margin_gate * ratio_gate
+-            if MGSD_RISK_ONLY:
+-                tolerance = torch.where(
++            if MGSD_V6_ENABLED:
++                margin_gate = torch.sigmoid(
++                    draft_margins.sub(MGSD_V6_DELTA_RISK).div(MGSD_V6_TAU_M_RISK)
++                )
++                ratio_gate = torch.sigmoid(
++                    draft_to_top1_ratio.sub(MGSD_V6_RHO_RISK).div(MGSD_V6_TAU_R_RISK)
++                )
++                risk_backoff = torch.ones_like(tolerance)
++                risk_backoff = _apply_token_backoff(
++                    draft_token_ids,
++                    risk_backoff,
++                    MGSD_NEGATION_TOKEN_IDS,
++                    MGSD_NEGATION_BACKOFF,
++                )
++                risk_backoff = _apply_token_backoff(
++                    draft_token_ids,
++                    risk_backoff,
++                    MGSD_NUMERIC_TOKEN_IDS,
++                    MGSD_NUMERIC_BACKOFF,
++                )
++                risk_backoff = _apply_token_backoff(
++                    draft_token_ids,
++                    risk_backoff,
++                    MGSD_UNIT_TOKEN_IDS,
++                    MGSD_UNIT_BACKOFF,
++                )
++                risk_backoff = _apply_token_backoff(
++                    draft_token_ids,
++                    risk_backoff,
++                    MGSD_FREQUENCY_TOKEN_IDS,
++                    MGSD_FREQUENCY_BACKOFF,
++                )
++                risk_backoff = _apply_token_backoff(
++                    draft_token_ids,
++                    risk_backoff,
++                    MGSD_MEDICATION_TOKEN_IDS,
++                    MGSD_MEDICATION_BACKOFF,
++                )
++                risk_gate = margin_gate * ratio_gate * risk_backoff
++                safe_margin_gate = torch.sigmoid(
++                    draft_margins.sub(MGSD_V6_DELTA_SAFE).div(MGSD_V6_TAU_M_SAFE)
++                )
++                safe_ratio_gate = torch.sigmoid(
++                    draft_to_top1_ratio.sub(MGSD_V6_RHO_SAFE).div(MGSD_V6_TAU_R_SAFE)
++                )
++                safe_gate_core = safe_margin_gate * safe_ratio_gate
++                safe_gate = MGSD_V6_SAFE_FLOOR + (
++                    1.0 - MGSD_V6_SAFE_FLOOR
++                ) * safe_gate_core
++                gate_scale = torch.where(risk_mask, risk_gate, safe_gate)
++                tolerance = tolerance * gate_scale
++                margin_gate = torch.where(risk_mask, margin_gate, safe_margin_gate)
++                ratio_gate = torch.where(risk_mask, ratio_gate, safe_ratio_gate)
++                risk_backoff = torch.where(
+                     risk_mask,
+-                    tolerance * gate_scale,
+-                    tolerance,
++                    risk_backoff,
++                    torch.ones_like(risk_backoff),
+                 )
+             else:
+-                tolerance = tolerance * gate_scale
+-            risk_backoff = torch.ones_like(tolerance)
+-            risk_backoff = _apply_token_backoff(
+-                draft_token_ids,
+-                risk_backoff,
+-                MGSD_NEGATION_TOKEN_IDS,
+-                MGSD_NEGATION_BACKOFF,
+-            )
+-            risk_backoff = _apply_token_backoff(
+-                draft_token_ids,
+-                risk_backoff,
+-                MGSD_NUMERIC_TOKEN_IDS,
+-                MGSD_NUMERIC_BACKOFF,
+-            )
+-            risk_backoff = _apply_token_backoff(
+-                draft_token_ids,
+-                risk_backoff,
+-                MGSD_UNIT_TOKEN_IDS,
+-                MGSD_UNIT_BACKOFF,
+-            )
+-            risk_backoff = _apply_token_backoff(
+-                draft_token_ids,
+-                risk_backoff,
+-                MGSD_FREQUENCY_TOKEN_IDS,
+-                MGSD_FREQUENCY_BACKOFF,
+-            )
+-            risk_backoff = _apply_token_backoff(
+-                draft_token_ids,
+-                risk_backoff,
+-                MGSD_MEDICATION_TOKEN_IDS,
+-                MGSD_MEDICATION_BACKOFF,
+-            )
+-            tolerance = tolerance * risk_backoff
+-            safe_gate = torch.where(
+-                risk_mask,
+-                torch.ones_like(gate_scale),
+-                gate_scale if MGSD_RISK_ONLY else torch.zeros_like(gate_scale),
+-            )
+-            risk_gate = torch.where(
+-                risk_mask,
+-                gate_scale * risk_backoff,
+-                torch.ones_like(gate_scale),
+-            )
++                margin_gate = torch.sigmoid(
++                    draft_margins.sub(MGSD_MARGIN_DELTA).div(MGSD_SOFT_TAU)
++                )
++                ratio_gate = torch.sigmoid(
++                    draft_to_top1_ratio.sub(MGSD_DRAFT_MIN_RATIO).div(MGSD_RATIO_TAU)
++                )
++                gate_scale = margin_gate * ratio_gate
++                if MGSD_RISK_ONLY:
++                    tolerance = torch.where(
++                        risk_mask,
++                        tolerance * gate_scale,
++                        tolerance,
++                    )
++                else:
++                    tolerance = tolerance * gate_scale
++                risk_backoff = torch.ones_like(tolerance)
++                risk_backoff = _apply_token_backoff(
++                    draft_token_ids,
++                    risk_backoff,
++                    MGSD_NEGATION_TOKEN_IDS,
++                    MGSD_NEGATION_BACKOFF,
++                )
++                risk_backoff = _apply_token_backoff(
++                    draft_token_ids,
++                    risk_backoff,
++                    MGSD_NUMERIC_TOKEN_IDS,
++                    MGSD_NUMERIC_BACKOFF,
++                )
++                risk_backoff = _apply_token_backoff(
++                    draft_token_ids,
++                    risk_backoff,
++                    MGSD_UNIT_TOKEN_IDS,
++                    MGSD_UNIT_BACKOFF,
++                )
++                risk_backoff = _apply_token_backoff(
++                    draft_token_ids,
++                    risk_backoff,
++                    MGSD_FREQUENCY_TOKEN_IDS,
++                    MGSD_FREQUENCY_BACKOFF,
++                )
++                risk_backoff = _apply_token_backoff(
++                    draft_token_ids,
++                    risk_backoff,
++                    MGSD_MEDICATION_TOKEN_IDS,
++                    MGSD_MEDICATION_BACKOFF,
++                )
++                tolerance = tolerance * risk_backoff
++                safe_gate = torch.where(
++                    risk_mask,
++                    torch.ones_like(gate_scale),
++                    gate_scale if MGSD_RISK_ONLY else torch.zeros_like(gate_scale),
++                )
++                risk_gate = torch.where(
++                    risk_mask,
++                    gate_scale * risk_backoff,
++                    torch.ones_like(gate_scale),
++                )
+         if draft_probs is not None:
+             draft_accept_probs = draft_probs[
+                 torch.arange(num_tokens, device=draft_probs.device),
+-- 
+2.34.1
+

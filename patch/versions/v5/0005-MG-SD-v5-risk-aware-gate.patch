@@ -1,0 +1,558 @@
+From 7b31a4b03bfc4a716280f144b16907def6580dca Mon Sep 17 00:00:00 2001
+From: sunchendd <sunchendong@kunlunit.com>
+Date: Fri, 19 Jun 2026 10:11:52 +0000
+Subject: [PATCH] feat: add MG-SD v5 risk-aware gate
+
+Save the draft-conditioned v5 gate with ratio gating, risk-only mode, risk backoff controls, and debug logging in the installed vLLM tree.
+
+Co-authored-by: Copilot <223556219+Copilot@users.noreply.github.com>
+---
+ v1/sample/rejection_sampler.py | 467 ++++++++++++++++++++++++++++++++-
+ 1 file changed, 456 insertions(+), 11 deletions(-)
+
+diff --git a/v1/sample/rejection_sampler.py b/v1/sample/rejection_sampler.py
+index 3505abc..df8f8a8 100644
+--- a/v1/sample/rejection_sampler.py
++++ b/v1/sample/rejection_sampler.py
+@@ -3,6 +3,7 @@
+ 
+ from __future__ import annotations
+ 
++import json
+ import math
+ import os
+ from collections.abc import Sequence
+@@ -29,6 +30,24 @@ if TYPE_CHECKING:
+ 
+ logger = init_logger(__name__)
+ 
++def _parse_bool_env(name: str, default: bool = False) -> bool:
++    raw_value = os.environ.get(name)
++    if raw_value is None:
++        return default
++    normalized = raw_value.strip().lower()
++    if normalized in ("1", "true", "yes", "on"):
++        return True
++    if normalized in ("0", "false", "no", "off"):
++        return False
++    logger.warning(
++        "Invalid %s=%r, falling back to %s",
++        name,
++        raw_value,
++        default,
++    )
++    return default
++
++
+ def _parse_float_env(name: str, default: str) -> float:
+     raw_value = os.environ.get(name, default)
+     try:
+@@ -52,6 +71,37 @@ def _parse_float_env(name: str, default: str) -> float:
+     return parsed_value
+ 
+ 
++def _parse_int_env(name: str, default: str) -> int:
++    raw_value = os.environ.get(name, default)
++    try:
++        return int(raw_value)
++    except ValueError:
++        logger.warning(
++            "Invalid %s=%r, falling back to %s",
++            name,
++            raw_value,
++            default,
++        )
++        return int(default)
++
++
++def _parse_int_list_env(name: str) -> tuple[int, ...]:
++    raw_value = os.environ.get(name, "").strip()
++    if not raw_value:
++        return ()
++    try:
++        return tuple(
++            int(part.strip()) for part in raw_value.split(",") if part.strip()
++        )
++    except ValueError:
++        logger.warning(
++            "Invalid %s=%r, falling back to empty token set",
++            name,
++            raw_value,
++        )
++        return ()
++
++
+ EARS_BASE_TOLERANCE = _parse_float_env("VLLM_EARS_BASE_TOLERANCE", "0.0")
+ MGSD_ENABLED = os.environ.get("VLLM_MGSD_ENABLED", "0").lower() in (
+     "1",
+@@ -59,16 +109,46 @@ MGSD_ENABLED = os.environ.get("VLLM_MGSD_ENABLED", "0").lower() in (
+     "yes",
+ )
+ MGSD_MARGIN_DELTA = _parse_float_env("VLLM_MGSD_MARGIN_DELTA", "0.0")
+-MGSD_SOFT_TAU = _parse_float_env("VLLM_MGSD_SOFT_TAU", "0.05")
+-MGSD_DRAFT_MIN_RATIO = _parse_float_env("VLLM_MGSD_DRAFT_MIN_RATIO", "0.0")
++MGSD_SOFT_TAU = _parse_float_env("VLLM_MGSD_SOFT_TAU", "0.03")
++MGSD_DRAFT_MIN_RATIO = _parse_float_env("VLLM_MGSD_DRAFT_MIN_RATIO", "0.85")
++MGSD_RATIO_TAU = _parse_float_env("VLLM_MGSD_RATIO_TAU", "0.05")
++MGSD_RISK_ONLY = _parse_bool_env("VLLM_MGSD_RISK_ONLY", False)
++MGSD_NEGATION_BACKOFF = _parse_float_env("VLLM_MGSD_NEGATION_BACKOFF", "1.0")
++MGSD_NUMERIC_BACKOFF = _parse_float_env("VLLM_MGSD_NUMERIC_BACKOFF", "1.0")
++MGSD_UNIT_BACKOFF = _parse_float_env("VLLM_MGSD_UNIT_BACKOFF", "1.0")
++MGSD_FREQUENCY_BACKOFF = _parse_float_env("VLLM_MGSD_FREQUENCY_BACKOFF", "1.0")
++MGSD_MEDICATION_BACKOFF = _parse_float_env("VLLM_MGSD_MEDICATION_BACKOFF", "1.0")
++MGSD_NEGATION_TOKEN_IDS = _parse_int_list_env("VLLM_MGSD_NEGATION_TOKEN_IDS")
++MGSD_NUMERIC_TOKEN_IDS = _parse_int_list_env("VLLM_MGSD_NUMERIC_TOKEN_IDS")
++MGSD_UNIT_TOKEN_IDS = _parse_int_list_env("VLLM_MGSD_UNIT_TOKEN_IDS")
++MGSD_FREQUENCY_TOKEN_IDS = _parse_int_list_env("VLLM_MGSD_FREQUENCY_TOKEN_IDS")
++MGSD_MEDICATION_TOKEN_IDS = _parse_int_list_env("VLLM_MGSD_MEDICATION_TOKEN_IDS")
++MGSD_DEBUG_LOG_PATH = os.environ.get("VLLM_MGSD_DEBUG_LOG_PATH", "").strip()
++MGSD_DEBUG_MAX_ROWS = max(_parse_int_env("VLLM_MGSD_DEBUG_MAX_ROWS", "0"), 0)
++_MGSD_DEBUG_EMITTED = 0
++_MGSD_DEBUG_CALL_ID = 0
+ if EARS_BASE_TOLERANCE > 0:
+     if MGSD_ENABLED:
+         logger.info(
+-            "MG-SD enabled with base_tolerance=%.3f margin_delta=%.3f soft_tau=%.3f draft_min_ratio=%.3f",
++            (
++                "MG-SD enabled with base_tolerance=%.3f margin_delta=%.3f "
++                "soft_tau=%.3f draft_min_ratio=%.3f ratio_tau=%.3f "
++                "risk_only=%s debug_log=%s debug_max_rows=%d "
++                "risk_backoff(neg=%.2f,num=%.2f,unit=%.2f,freq=%.2f,med=%.2f)"
++            ),
+             EARS_BASE_TOLERANCE,
+             MGSD_MARGIN_DELTA,
+             MGSD_SOFT_TAU,
+             MGSD_DRAFT_MIN_RATIO,
++            MGSD_RATIO_TAU,
++            MGSD_RISK_ONLY,
++            bool(MGSD_DEBUG_LOG_PATH),
++            MGSD_DEBUG_MAX_ROWS,
++            MGSD_NEGATION_BACKOFF,
++            MGSD_NUMERIC_BACKOFF,
++            MGSD_UNIT_BACKOFF,
++            MGSD_FREQUENCY_BACKOFF,
++            MGSD_MEDICATION_BACKOFF,
+         )
+     else:
+         logger.info("EARS enabled with base_tolerance=%.3f", EARS_BASE_TOLERANCE)
+@@ -80,6 +160,268 @@ GREEDY_TEMPERATURE: tl.constexpr = 0
+ MAX_SPEC_LEN = 128
+ 
+ 
++def _apply_token_backoff(
++    draft_token_ids: torch.Tensor,
++    risk_backoff: torch.Tensor,
++    token_ids: tuple[int, ...],
++    backoff_value: float,
++) -> torch.Tensor:
++    if not token_ids or backoff_value >= 1.0:
++        return risk_backoff
++    token_mask = _build_token_mask(draft_token_ids, token_ids)
++    if not token_mask.any():
++        return risk_backoff
++    clamped_backoff = min(max(backoff_value, 0.0), 1.0)
++    return torch.where(
++        token_mask,
++        torch.minimum(
++            risk_backoff,
++            torch.full_like(risk_backoff, clamped_backoff),
++        ),
++        risk_backoff,
++    )
++
++
++def _build_token_mask(
++    draft_token_ids: torch.Tensor,
++    token_ids: tuple[int, ...],
++) -> torch.Tensor:
++    if not token_ids:
++        return torch.zeros_like(draft_token_ids, dtype=torch.bool)
++    token_tensor = torch.tensor(
++        token_ids,
++        dtype=draft_token_ids.dtype,
++        device=draft_token_ids.device,
++    )
++    return torch.isin(draft_token_ids, token_tensor)
++
++
++def _build_risk_mask(draft_token_ids: torch.Tensor) -> torch.Tensor:
++    risk_mask = _build_token_mask(draft_token_ids, MGSD_NEGATION_TOKEN_IDS)
++    risk_mask |= _build_token_mask(draft_token_ids, MGSD_NUMERIC_TOKEN_IDS)
++    risk_mask |= _build_token_mask(draft_token_ids, MGSD_UNIT_TOKEN_IDS)
++    risk_mask |= _build_token_mask(draft_token_ids, MGSD_FREQUENCY_TOKEN_IDS)
++    risk_mask |= _build_token_mask(draft_token_ids, MGSD_MEDICATION_TOKEN_IDS)
++    return risk_mask
++
++
++def _maybe_log_gate_components(
++    *,
++    cu_num_draft_tokens: torch.Tensor,
++    draft_token_ids: torch.Tensor,
++    risk_mask: torch.Tensor | None,
++    target_top1_probs: torch.Tensor | None,
++    target_draft_probs: torch.Tensor | None,
++    best_non_draft_probs: torch.Tensor | None,
++    draft_margins: torch.Tensor | None,
++    draft_to_top1_ratio: torch.Tensor | None,
++    margin_gate: torch.Tensor | None,
++    ratio_gate: torch.Tensor | None,
++    gate_scale: torch.Tensor | None,
++    safe_gate: torch.Tensor | None,
++    risk_gate: torch.Tensor | None,
++    risk_backoff: torch.Tensor | None,
++    tolerance: torch.Tensor | None,
++    raw_uniform_probs: torch.Tensor | None,
++    adjusted_uniform_probs: torch.Tensor | None,
++    draft_accept_probs: torch.Tensor | None,
++    is_greedy: torch.Tensor | None,
++) -> None:
++    global _MGSD_DEBUG_CALL_ID, _MGSD_DEBUG_EMITTED
++    if not MGSD_DEBUG_LOG_PATH or MGSD_DEBUG_MAX_ROWS <= 0:
++        return
++    remaining = MGSD_DEBUG_MAX_ROWS - _MGSD_DEBUG_EMITTED
++    if remaining <= 0:
++        return
++
++    cu_tokens = cu_num_draft_tokens.detach().cpu().tolist()
++    draft_ids = draft_token_ids.detach().cpu().tolist()
++    risk_flags = (
++        [bool(flag) for flag in risk_mask.detach().cpu().tolist()]
++        if risk_mask is not None
++        else None
++    )
++    top1_probs = (
++        target_top1_probs.detach().cpu().tolist()
++        if target_top1_probs is not None
++        else None
++    )
++    draft_probs = (
++        target_draft_probs.detach().cpu().tolist()
++        if target_draft_probs is not None
++        else None
++    )
++    alt_probs = (
++        best_non_draft_probs.detach().cpu().tolist()
++        if best_non_draft_probs is not None
++        else None
++    )
++    margins = (
++        draft_margins.detach().cpu().tolist()
++        if draft_margins is not None
++        else None
++    )
++    ratios = (
++        draft_to_top1_ratio.detach().cpu().tolist()
++        if draft_to_top1_ratio is not None
++        else None
++    )
++    margin_gates = (
++        margin_gate.detach().cpu().tolist()
++        if margin_gate is not None
++        else None
++    )
++    ratio_gates = (
++        ratio_gate.detach().cpu().tolist()
++        if ratio_gate is not None
++        else None
++    )
++    gate_scales = (
++        gate_scale.detach().cpu().tolist()
++        if gate_scale is not None
++        else None
++    )
++    safe_gates = (
++        safe_gate.detach().cpu().tolist()
++        if safe_gate is not None
++        else None
++    )
++    risk_gates = (
++        risk_gate.detach().cpu().tolist()
++        if risk_gate is not None
++        else None
++    )
++    backoffs = (
++        risk_backoff.detach().cpu().tolist()
++        if risk_backoff is not None
++        else None
++    )
++    tolerances = (
++        tolerance.detach().cpu().tolist()
++        if tolerance is not None
++        else None
++    )
++    raw_uniforms = (
++        raw_uniform_probs.detach().cpu().tolist()
++        if raw_uniform_probs is not None
++        else None
++    )
++    adjusted_uniforms = (
++        adjusted_uniform_probs.detach().cpu().tolist()
++        if adjusted_uniform_probs is not None
++        else None
++    )
++    accept_probs = (
++        draft_accept_probs.detach().cpu().tolist()
++        if draft_accept_probs is not None
++        else None
++    )
++    if is_greedy is None:
++        greedy_flags = [True] * len(cu_tokens)
++    else:
++        greedy_flags = [bool(flag) for flag in is_greedy.detach().cpu().tolist()]
++
++    call_id = _MGSD_DEBUG_CALL_ID
++    _MGSD_DEBUG_CALL_ID += 1
++    os.makedirs(os.path.dirname(MGSD_DEBUG_LOG_PATH) or ".", exist_ok=True)
++    with open(MGSD_DEBUG_LOG_PATH, "a", encoding="utf-8") as handle:
++        start_idx = 0
++        for req_idx, end_idx in enumerate(cu_tokens):
++            rejected = False
++            for pos in range(end_idx - start_idx):
++                flat_idx = start_idx + pos
++                evaluated = not rejected
++                accepted: bool | None = None
++                if evaluated and not greedy_flags[req_idx]:
++                    accept_prob = (
++                        accept_probs[flat_idx] if accept_probs is not None else None
++                    )
++                    adjusted_uniform = (
++                        adjusted_uniforms[flat_idx]
++                        if adjusted_uniforms is not None
++                        else None
++                    )
++                    if accept_prob is not None and adjusted_uniform is not None:
++                        accepted = accept_prob >= adjusted_uniform
++                        if not accepted:
++                            rejected = True
++                entry = {
++                    "call_id": call_id,
++                    "req_idx": req_idx,
++                    "position": pos,
++                    "draft_token_id": draft_ids[flat_idx],
++                    "is_risk_token": (
++                        risk_flags[flat_idx] if risk_flags is not None else False
++                    ),
++                    "risk_is_negation": draft_ids[flat_idx] in MGSD_NEGATION_TOKEN_IDS,
++                    "risk_is_numeric": draft_ids[flat_idx] in MGSD_NUMERIC_TOKEN_IDS,
++                    "risk_is_unit": draft_ids[flat_idx] in MGSD_UNIT_TOKEN_IDS,
++                    "risk_is_frequency": draft_ids[flat_idx] in MGSD_FREQUENCY_TOKEN_IDS,
++                    "risk_is_medication": (
++                        draft_ids[flat_idx] in MGSD_MEDICATION_TOKEN_IDS
++                    ),
++                    "gate_path": (
++                        "risk"
++                        if risk_flags is not None and risk_flags[flat_idx]
++                        else "safe"
++                    ),
++                    "evaluated": evaluated,
++                    "accepted": accepted,
++                    "target_top1_prob": (
++                        top1_probs[flat_idx] if top1_probs is not None else None
++                    ),
++                    "target_draft_prob": (
++                        draft_probs[flat_idx] if draft_probs is not None else None
++                    ),
++                    "best_non_draft_prob": (
++                        alt_probs[flat_idx] if alt_probs is not None else None
++                    ),
++                    "draft_margin": (
++                        margins[flat_idx] if margins is not None else None
++                    ),
++                    "draft_to_top1_ratio": (
++                        ratios[flat_idx] if ratios is not None else None
++                    ),
++                    "margin_gate": (
++                        margin_gates[flat_idx] if margin_gates is not None else None
++                    ),
++                    "ratio_gate": (
++                        ratio_gates[flat_idx] if ratio_gates is not None else None
++                    ),
++                    "gate_scale": (
++                        gate_scales[flat_idx] if gate_scales is not None else None
++                    ),
++                    "safe_gate": (
++                        safe_gates[flat_idx] if safe_gates is not None else None
++                    ),
++                    "risk_gate": (
++                        risk_gates[flat_idx] if risk_gates is not None else None
++                    ),
++                    "risk_backoff": (
++                        backoffs[flat_idx] if backoffs is not None else None
++                    ),
++                    "tolerance": (
++                        tolerances[flat_idx] if tolerances is not None else None
++                    ),
++                    "raw_uniform_prob": (
++                        raw_uniforms[flat_idx] if raw_uniforms is not None else None
++                    ),
++                    "adjusted_uniform_prob": (
++                        adjusted_uniforms[flat_idx]
++                        if adjusted_uniforms is not None
++                        else None
++                    ),
++                    "draft_accept_prob": (
++                        accept_probs[flat_idx] if accept_probs is not None else None
++                    ),
++                }
++                handle.write(json.dumps(entry, ensure_ascii=True) + "\n")
++                _MGSD_DEBUG_EMITTED += 1
++                if _MGSD_DEBUG_EMITTED >= MGSD_DEBUG_MAX_ROWS:
++                    return
++            start_idx = end_idx
++
++
+ class RejectionSampler(nn.Module):
+     """
+     The implementation strictly follows the algorithm described in
+@@ -516,13 +858,28 @@ def rejection_sample(
+     assert target_probs.is_contiguous()
+ 
+     max_target_probs = None
++    target_top1_probs = None
++    target_draft_probs = None
++    best_non_draft_probs = None
++    draft_margins = None
++    draft_to_top1_ratio = None
++    margin_gate = None
++    ratio_gate = None
++    gate_scale = None
++    safe_gate = None
++    risk_gate = None
++    risk_backoff = None
++    risk_mask = None
++    raw_uniform_probs = None
++    draft_accept_probs = None
+     ears_enabled = EARS_BASE_TOLERANCE > 0
+     mgsd_enabled = ears_enabled and MGSD_ENABLED
+     if ears_enabled:
+         max_target_probs = target_probs.max(dim=-1).values.contiguous()
+         tolerance = EARS_BASE_TOLERANCE * (1.0 - max_target_probs)
++        if MGSD_DEBUG_LOG_PATH and MGSD_DEBUG_MAX_ROWS > 0 and uniform_probs is not None:
++            raw_uniform_probs = uniform_probs.clone()
+         if mgsd_enabled:
+-            num_tokens = draft_token_ids.shape[0]
+             token_indices = torch.arange(num_tokens, device=target_probs.device)
+             target_top2_probs, target_top2_ids = target_probs.topk(k=2, dim=-1)
+             target_top1_probs = target_top2_probs[:, 0].contiguous()
+@@ -540,16 +897,83 @@ def rejection_sample(
+                 target_draft_probs / target_top1_probs,
+                 torch.zeros_like(target_draft_probs),
+             )
+-            gate = torch.sigmoid(
++            risk_mask = _build_risk_mask(draft_token_ids)
++            margin_gate = torch.sigmoid(
+                 draft_margins.sub(MGSD_MARGIN_DELTA).div(MGSD_SOFT_TAU)
+             )
+-            if MGSD_DRAFT_MIN_RATIO > 0:
+-                gate = torch.where(
+-                    draft_to_top1_ratio >= MGSD_DRAFT_MIN_RATIO,
+-                    gate,
+-                    torch.zeros_like(gate),
++            ratio_gate = torch.sigmoid(
++                draft_to_top1_ratio.sub(MGSD_DRAFT_MIN_RATIO).div(MGSD_RATIO_TAU)
++            )
++            gate_scale = margin_gate * ratio_gate
++            if MGSD_RISK_ONLY:
++                tolerance = torch.where(
++                    risk_mask,
++                    tolerance * gate_scale,
++                    tolerance,
+                 )
+-            tolerance = tolerance * gate
++            else:
++                tolerance = tolerance * gate_scale
++            risk_backoff = torch.ones_like(tolerance)
++            risk_backoff = _apply_token_backoff(
++                draft_token_ids,
++                risk_backoff,
++                MGSD_NEGATION_TOKEN_IDS,
++                MGSD_NEGATION_BACKOFF,
++            )
++            risk_backoff = _apply_token_backoff(
++                draft_token_ids,
++                risk_backoff,
++                MGSD_NUMERIC_TOKEN_IDS,
++                MGSD_NUMERIC_BACKOFF,
++            )
++            risk_backoff = _apply_token_backoff(
++                draft_token_ids,
++                risk_backoff,
++                MGSD_UNIT_TOKEN_IDS,
++                MGSD_UNIT_BACKOFF,
++            )
++            risk_backoff = _apply_token_backoff(
++                draft_token_ids,
++                risk_backoff,
++                MGSD_FREQUENCY_TOKEN_IDS,
++                MGSD_FREQUENCY_BACKOFF,
++            )
++            risk_backoff = _apply_token_backoff(
++                draft_token_ids,
++                risk_backoff,
++                MGSD_MEDICATION_TOKEN_IDS,
++                MGSD_MEDICATION_BACKOFF,
++            )
++            tolerance = tolerance * risk_backoff
++            safe_gate = torch.where(
++                risk_mask,
++                torch.ones_like(gate_scale),
++                gate_scale if MGSD_RISK_ONLY else torch.zeros_like(gate_scale),
++            )
++            risk_gate = torch.where(
++                risk_mask,
++                gate_scale * risk_backoff,
++                torch.ones_like(gate_scale),
++            )
++        if draft_probs is not None:
++            draft_accept_probs = draft_probs[
++                torch.arange(num_tokens, device=draft_probs.device),
++                draft_token_ids,
++            ].contiguous()
++            draft_accept_probs = torch.where(
++                draft_accept_probs > 0,
++                target_probs[
++                    torch.arange(num_tokens, device=target_probs.device),
++                    draft_token_ids,
++                ].contiguous()
++                / draft_accept_probs,
++                torch.zeros_like(draft_accept_probs),
++            )
++        else:
++            draft_accept_probs = target_probs[
++                torch.arange(num_tokens, device=target_probs.device),
++                draft_token_ids,
++            ].contiguous()
+         assert uniform_probs is not None
+         uniform_probs = uniform_probs - tolerance
+ 
+@@ -584,6 +1008,27 @@ def rejection_sample(
+         NO_DRAFT_PROBS=draft_probs is None,
+         SYNTHETIC_MODE=synthetic_mode,
+     )
++    _maybe_log_gate_components(
++        cu_num_draft_tokens=cu_num_draft_tokens,
++        draft_token_ids=draft_token_ids,
++        risk_mask=risk_mask,
++        target_top1_probs=target_top1_probs,
++        target_draft_probs=target_draft_probs,
++        best_non_draft_probs=best_non_draft_probs,
++        draft_margins=draft_margins,
++        draft_to_top1_ratio=draft_to_top1_ratio,
++        margin_gate=margin_gate,
++        ratio_gate=ratio_gate,
++        gate_scale=gate_scale,
++        safe_gate=safe_gate,
++        risk_gate=risk_gate,
++        risk_backoff=risk_backoff,
++        tolerance=tolerance if ears_enabled else None,
++        raw_uniform_probs=raw_uniform_probs,
++        adjusted_uniform_probs=uniform_probs if ears_enabled else None,
++        draft_accept_probs=draft_accept_probs,
++        is_greedy=is_greedy,
++    )
+     return output_token_ids
+ 
+ 
+-- 
+2.34.1
+

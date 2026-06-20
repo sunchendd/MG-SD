@@ -1,0 +1,90 @@
+From 05be8c2c9f1a4f1208e9ae1597359d55b3959b38 Mon Sep 17 00:00:00 2001
+From: sunchendd <sunchendong@kunlunit.com>
+Date: Fri, 19 Jun 2026 10:09:24 +0000
+Subject: [PATCH] feat: add MG-SD v4 draft-conditioned gate
+
+Add the draft-conditioned soft gate parameters and acceptance scaling logic on top of the existing MG-SD v3 implementation.
+
+Co-authored-by: Copilot <223556219+Copilot@users.noreply.github.com>
+---
+ v1/sample/rejection_sampler.py | 46 +++++++++++++++++++++++++---------
+ 1 file changed, 34 insertions(+), 12 deletions(-)
+
+diff --git a/v1/sample/rejection_sampler.py b/v1/sample/rejection_sampler.py
+index 7cc4770..3505abc 100644
+--- a/v1/sample/rejection_sampler.py
++++ b/v1/sample/rejection_sampler.py
+@@ -59,12 +59,16 @@ MGSD_ENABLED = os.environ.get("VLLM_MGSD_ENABLED", "0").lower() in (
+     "yes",
+ )
+ MGSD_MARGIN_DELTA = _parse_float_env("VLLM_MGSD_MARGIN_DELTA", "0.0")
++MGSD_SOFT_TAU = _parse_float_env("VLLM_MGSD_SOFT_TAU", "0.05")
++MGSD_DRAFT_MIN_RATIO = _parse_float_env("VLLM_MGSD_DRAFT_MIN_RATIO", "0.0")
+ if EARS_BASE_TOLERANCE > 0:
+     if MGSD_ENABLED:
+         logger.info(
+-            "MG-SD enabled with base_tolerance=%.3f margin_delta=%.3f",
++            "MG-SD enabled with base_tolerance=%.3f margin_delta=%.3f soft_tau=%.3f draft_min_ratio=%.3f",
+             EARS_BASE_TOLERANCE,
+             MGSD_MARGIN_DELTA,
++            MGSD_SOFT_TAU,
++            MGSD_DRAFT_MIN_RATIO,
+         )
+     else:
+         logger.info("EARS enabled with base_tolerance=%.3f", EARS_BASE_TOLERANCE)
+@@ -511,23 +515,41 @@ def rejection_sample(
+     target_probs = target_logits.softmax(dim=-1, dtype=torch.float32)
+     assert target_probs.is_contiguous()
+ 
+-    target_top2_probs = None
+     max_target_probs = None
+-    target_margins = None
+     ears_enabled = EARS_BASE_TOLERANCE > 0
+     mgsd_enabled = ears_enabled and MGSD_ENABLED
+     if ears_enabled:
+-        if mgsd_enabled:
+-            target_top2_probs = target_probs.topk(k=2, dim=-1).values
+-            max_target_probs = target_top2_probs[:, 0].contiguous()
+-            target_margins = (
+-                target_top2_probs[:, 0] - target_top2_probs[:, 1]
+-            ).contiguous()
+-        else:
+-            max_target_probs = target_probs.max(dim=-1).values.contiguous()
++        max_target_probs = target_probs.max(dim=-1).values.contiguous()
+         tolerance = EARS_BASE_TOLERANCE * (1.0 - max_target_probs)
+         if mgsd_enabled:
+-            tolerance = torch.where(target_margins > MGSD_MARGIN_DELTA, tolerance, 0.0)
++            num_tokens = draft_token_ids.shape[0]
++            token_indices = torch.arange(num_tokens, device=target_probs.device)
++            target_top2_probs, target_top2_ids = target_probs.topk(k=2, dim=-1)
++            target_top1_probs = target_top2_probs[:, 0].contiguous()
++            target_draft_probs = target_probs[
++                token_indices, draft_token_ids
++            ].contiguous()
++            best_non_draft_probs = torch.where(
++                target_top2_ids[:, 0] == draft_token_ids,
++                target_top2_probs[:, 1],
++                target_top1_probs,
++            ).contiguous()
++            draft_margins = target_draft_probs - best_non_draft_probs
++            draft_to_top1_ratio = torch.where(
++                target_top1_probs > 0,
++                target_draft_probs / target_top1_probs,
++                torch.zeros_like(target_draft_probs),
++            )
++            gate = torch.sigmoid(
++                draft_margins.sub(MGSD_MARGIN_DELTA).div(MGSD_SOFT_TAU)
++            )
++            if MGSD_DRAFT_MIN_RATIO > 0:
++                gate = torch.where(
++                    draft_to_top1_ratio >= MGSD_DRAFT_MIN_RATIO,
++                    gate,
++                    torch.zeros_like(gate),
++                )
++            tolerance = tolerance * gate
+         assert uniform_probs is not None
+         uniform_probs = uniform_probs - tolerance
+ 
+-- 
+2.34.1
+
