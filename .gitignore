@@ -1,0 +1,7 @@
+__pycache__/
+*.pyc
+entity_eval_v6_smoke_20/
+pilot_datasets.jsonl
+datasets/*.jsonl
+entity_eval_v6_rebuild/
+tmp*/

@@ -1,0 +1,2 @@
+{"note_id":"n1","prompt":"synthetic prompt one","gold":"Aspirin 81 mg daily.","gold_entity_counts":{"medications":1,"doses":1,"frequencies":1,"negations":0}}
+{"note_id":"n2","prompt":"synthetic prompt two","gold":"No medication change.","gold_entity_counts":{"medications":0,"doses":0,"frequencies":0,"negations":1}}
