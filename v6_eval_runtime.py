@@ -15,6 +15,37 @@ NEGATION_TERMS = ("no", "not", "denies", "without", "negative for", "free of")
 UNIT_TERMS = ("mg", "mcg", "g", "ml", "l", "unit", "units", "meq", "mmol")
 FREQUENCY_TERMS = ("daily", "bid", "tid", "qid", "qhs", "prn", "nightly", "weekly")
 NUMERIC_TERMS = tuple(str(value) for value in range(1001))
+OVERRIDABLE_METHOD_ENV_NAMES = {
+  "VLLM_MGSD_SOFT_TAU",
+  "VLLM_MGSD_DRAFT_MIN_RATIO",
+  "VLLM_MGSD_RATIO_TAU",
+  "VLLM_MGSD_NEGATION_BACKOFF",
+  "VLLM_MGSD_NUMERIC_BACKOFF",
+  "VLLM_MGSD_UNIT_BACKOFF",
+  "VLLM_MGSD_FREQUENCY_BACKOFF",
+  "VLLM_MGSD_MEDICATION_BACKOFF",
+  "VLLM_MGSD_V6_SAFE_FLOOR",
+  "VLLM_MGSD_V6_DELTA_SAFE",
+  "VLLM_MGSD_V6_TAU_M_SAFE",
+  "VLLM_MGSD_V6_RHO_SAFE",
+  "VLLM_MGSD_V6_TAU_R_SAFE",
+  "VLLM_MGSD_V6_DELTA_RISK",
+  "VLLM_MGSD_V6_TAU_M_RISK",
+  "VLLM_MGSD_V6_RHO_RISK",
+  "VLLM_MGSD_V6_TAU_R_RISK",
+  "VLLM_MGSD_V7_LAMBDA",
+  "VLLM_MGSD_V7_MIN_GATE",
+  "VLLM_MGSD_V7_DELTA",
+  "VLLM_MGSD_V7_TAU_M",
+  "VLLM_MGSD_V7_RHO",
+  "VLLM_MGSD_V7_TAU_R",
+  "VLLM_MGSD_V7_SAFE_FLOOR",
+  "VLLM_MGSD_V7_WEIGHT_NEGATION",
+  "VLLM_MGSD_V7_WEIGHT_NUMERIC",
+  "VLLM_MGSD_V7_WEIGHT_UNIT",
+  "VLLM_MGSD_V7_WEIGHT_FREQUENCY",
+  "VLLM_MGSD_V7_WEIGHT_MEDICATION",
+}
 
 
 def load_fixed_dataset(path, sample_count):
@@ -62,8 +93,10 @@ def validate_gpu_config(cuda_visible_devices, tensor_parallel_size):
 
 
 def build_method_env(preset, base_tolerance, risk_token_ids):
-  if preset not in {"v5", "v6-default"}:
+  if preset not in {"baseline", "v5", "v6-default", "v7-risk-score"}:
     raise ValueError(f"unsupported preset: {preset}")
+  if preset == "baseline":
+    return {}
 
   env = {
     "VLLM_EARS_BASE_TOLERANCE": str(base_tolerance),
@@ -73,7 +106,8 @@ def build_method_env(preset, base_tolerance, risk_token_ids):
     "VLLM_MGSD_DRAFT_MIN_RATIO": "0.85",
     "VLLM_MGSD_RATIO_TAU": "0.05",
     "VLLM_MGSD_RISK_ONLY": "0",
-    "VLLM_MGSD_V6_ENABLED": "1" if preset == "v6-default" else "0",
+    "VLLM_MGSD_V6_ENABLED": "1" if preset in {"v6-default", "v7-risk-score"} else "0",
+    "VLLM_MGSD_V7_ENABLED": "1" if preset == "v7-risk-score" else "0",
     "VLLM_MGSD_NEGATION_BACKOFF": "0.0",
     "VLLM_MGSD_NUMERIC_BACKOFF": "0.35",
     "VLLM_MGSD_UNIT_BACKOFF": "0.35",
@@ -92,9 +126,41 @@ def build_method_env(preset, base_tolerance, risk_token_ids):
       "VLLM_MGSD_V6_RHO_RISK": "0.85",
       "VLLM_MGSD_V6_TAU_R_RISK": "0.05",
     })
+  if preset == "v7-risk-score":
+    env.update({
+      "VLLM_MGSD_V6_SAFE_FLOOR": "0.75",
+      "VLLM_MGSD_V6_DELTA_SAFE": "-0.02",
+      "VLLM_MGSD_V6_TAU_M_SAFE": "0.05",
+      "VLLM_MGSD_V6_RHO_SAFE": "0.75",
+      "VLLM_MGSD_V6_TAU_R_SAFE": "0.12",
+      "VLLM_MGSD_V6_DELTA_RISK": "0.00",
+      "VLLM_MGSD_V6_TAU_M_RISK": "0.03",
+      "VLLM_MGSD_V6_RHO_RISK": "0.85",
+      "VLLM_MGSD_V6_TAU_R_RISK": "0.05",
+      "VLLM_MGSD_V7_LAMBDA": "0.75",
+      "VLLM_MGSD_V7_MIN_GATE": "0.10",
+      "VLLM_MGSD_V7_DELTA": "0.00",
+      "VLLM_MGSD_V7_TAU_M": "0.03",
+      "VLLM_MGSD_V7_RHO": "0.90",
+      "VLLM_MGSD_V7_TAU_R": "0.05",
+      "VLLM_MGSD_V7_SAFE_FLOOR": "0.85",
+      "VLLM_MGSD_V7_WEIGHT_NEGATION": "1.00",
+      "VLLM_MGSD_V7_WEIGHT_NUMERIC": "0.80",
+      "VLLM_MGSD_V7_WEIGHT_UNIT": "0.60",
+      "VLLM_MGSD_V7_WEIGHT_FREQUENCY": "0.80",
+      "VLLM_MGSD_V7_WEIGHT_MEDICATION": "0.70",
+    })
   for category, env_name in RISK_ENV_NAMES.items():
     values = risk_token_ids.get(category, set())
     env[env_name] = ",".join(str(value) for value in sorted(values))
+  return env
+
+
+def apply_method_env_overrides(method_env, override_env):
+  env = dict(method_env)
+  for name in OVERRIDABLE_METHOD_ENV_NAMES:
+    if name in env and name in override_env:
+      env[name] = str(override_env[name])
   return env
 
 

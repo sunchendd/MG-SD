@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-: "${PRESET:?Set PRESET to v5 or v6-default}"
+: "${PRESET:?Set PRESET to baseline, v5, v6-default, or v7-risk-score}"
 
 PROJECT_DIR="${PROJECT_DIR:-/home/scd/MG-SD}"
 DATASET_PATH="${DATASET_PATH:-${PROJECT_DIR}/datasets/v6_pilot20_seed123.jsonl}"
@@ -12,6 +12,7 @@ TARGET_MODEL="${TARGET_MODEL:-/data/models/Qwen3-32B}"
 DRAFT_MODEL="${DRAFT_MODEL:-/data/models/Qwen3-8B}"
 TENSOR_PARALLEL_SIZE="${TENSOR_PARALLEL_SIZE:-4}"
 BASE_TOLERANCE="${BASE_TOLERANCE:-0.2}"
+EVAL_GOLD_CHARS="${EVAL_GOLD_CHARS:-2048}"
 
 cd "${PROJECT_DIR}"
 
@@ -25,11 +26,13 @@ echo "[2/4] Verify fixed dataset and current GPU usage"
 wc -l "${DATASET_PATH}"
 nvidia-smi --query-gpu=index,name,memory.total,memory.used --format=csv
 
-echo "[3/4] Verify sampler exposes V6 hooks"
-python3 - <<'PY'
+echo "[3/4] Verify sampler exposes required MG-SD hooks"
+python3 - "${PRESET}" <<'PY'
 import importlib.util
+import sys
 from pathlib import Path
 
+preset = sys.argv[1]
 spec = importlib.util.find_spec("vllm.v1.sample.rejection_sampler")
 if not spec or not spec.origin:
     raise SystemExit("vLLM rejection sampler not found")
@@ -40,6 +43,13 @@ required = (
     "VLLM_MGSD_V6_RHO_SAFE",
     "VLLM_MGSD_V6_RHO_RISK",
 )
+if preset == "v7-risk-score":
+    required = required + (
+        "VLLM_MGSD_V7_ENABLED",
+        "VLLM_MGSD_V7_LAMBDA",
+        "VLLM_MGSD_V7_MIN_GATE",
+        "VLLM_MGSD_V7_WEIGHT_MEDICATION",
+    )
 missing = [name for name in required if name not in text]
 print("sampler =", spec.origin)
 if missing:
@@ -56,6 +66,7 @@ python3 run_entity_eval_v6.py \
   --tensor-parallel-size "${TENSOR_PARALLEL_SIZE}" \
   --cuda-visible-devices "${CUDA_VISIBLE_DEVICES_LIST}" \
   --base-tolerance "${BASE_TOLERANCE}" \
-  --sample-count "${SAMPLE_COUNT}"
+  --sample-count "${SAMPLE_COUNT}" \
+  --eval-gold-chars "${EVAL_GOLD_CHARS}"
 
 echo "Completed preset=${PRESET}; output=${OUTPUT_DIR}"

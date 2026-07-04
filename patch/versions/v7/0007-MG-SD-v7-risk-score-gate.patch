@@ -1,0 +1,121 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: luoqiyuan <149029740+lqzd666@users.noreply.github.com>
+Date: Fri, 3 Jul 2026 00:00:00 +0800
+Subject: [PATCH] feat: add MG-SD v7 risk-score gate
+
+Add a continuous clinical risk-score gate on top of the v6 conditional gate.
+V7 keeps the same draft/target verification flow and only changes the relaxed
+tolerance multiplier. Risk tokens receive a continuous gate based on token
+category severity and uncertainty from margin/ratio evidence.
+---
+ vllm/v1/sample/rejection_sampler.py | 81 ++++++++++++++++++++++++++++-
+ 1 file changed, 80 insertions(+), 1 deletion(-)
+
+diff --git a/vllm/v1/sample/rejection_sampler.py b/vllm/v1/sample/rejection_sampler.py
+index 000000000..111111111 100644
+--- a/vllm/v1/sample/rejection_sampler.py
++++ b/vllm/v1/sample/rejection_sampler.py
+@@ -123,6 +123,19 @@ MGSD_V6_DELTA_RISK = _parse_float_env("VLLM_MGSD_V6_DELTA_RISK", "0.00")
+ MGSD_V6_TAU_M_RISK = _parse_float_env("VLLM_MGSD_V6_TAU_M_RISK", "0.03")
+ MGSD_V6_RHO_RISK = _parse_float_env("VLLM_MGSD_V6_RHO_RISK", "0.85")
+ MGSD_V6_TAU_R_RISK = _parse_float_env("VLLM_MGSD_V6_TAU_R_RISK", "0.05")
++MGSD_V7_ENABLED = _parse_bool_env("VLLM_MGSD_V7_ENABLED", False)
++MGSD_V7_LAMBDA = _parse_float_env("VLLM_MGSD_V7_LAMBDA", "0.75")
++MGSD_V7_MIN_GATE = _parse_float_env("VLLM_MGSD_V7_MIN_GATE", "0.10")
++MGSD_V7_DELTA = _parse_float_env("VLLM_MGSD_V7_DELTA", "0.00")
++MGSD_V7_TAU_M = _parse_float_env("VLLM_MGSD_V7_TAU_M", "0.03")
++MGSD_V7_RHO = _parse_float_env("VLLM_MGSD_V7_RHO", "0.90")
++MGSD_V7_TAU_R = _parse_float_env("VLLM_MGSD_V7_TAU_R", "0.05")
++MGSD_V7_SAFE_FLOOR = _parse_float_env("VLLM_MGSD_V7_SAFE_FLOOR", "0.85")
++MGSD_V7_WEIGHT_NEGATION = _parse_float_env("VLLM_MGSD_V7_WEIGHT_NEGATION", "1.00")
++MGSD_V7_WEIGHT_NUMERIC = _parse_float_env("VLLM_MGSD_V7_WEIGHT_NUMERIC", "0.80")
++MGSD_V7_WEIGHT_UNIT = _parse_float_env("VLLM_MGSD_V7_WEIGHT_UNIT", "0.60")
++MGSD_V7_WEIGHT_FREQUENCY = _parse_float_env("VLLM_MGSD_V7_WEIGHT_FREQUENCY", "0.80")
++MGSD_V7_WEIGHT_MEDICATION = _parse_float_env("VLLM_MGSD_V7_WEIGHT_MEDICATION", "0.70")
+ MGSD_NEGATION_BACKOFF = _parse_float_env("VLLM_MGSD_NEGATION_BACKOFF", "1.0")
+ MGSD_NUMERIC_BACKOFF = _parse_float_env("VLLM_MGSD_NUMERIC_BACKOFF", "1.0")
+ MGSD_UNIT_BACKOFF = _parse_float_env("VLLM_MGSD_UNIT_BACKOFF", "1.0")
+@@ -152,7 +165,7 @@ if EARS_BASE_TOLERANCE > 0:
+             MGSD_SOFT_TAU,
+             MGSD_DRAFT_MIN_RATIO,
+             MGSD_RATIO_TAU,
+-            MGSD_RISK_ONLY,
++            MGSD_RISK_ONLY,
+             MGSD_V6_ENABLED,
+             bool(MGSD_DEBUG_LOG_PATH),
+             MGSD_DEBUG_MAX_ROWS,
+@@ -912,7 +925,72 @@ def rejection_sample(
+             )
+             risk_mask = _build_risk_mask(draft_token_ids)
+             if MGSD_V6_ENABLED:
+-                margin_gate = torch.sigmoid(
++                if MGSD_V7_ENABLED:
++                    margin_gate = torch.sigmoid(
++                        draft_margins.sub(MGSD_V7_DELTA).div(MGSD_V7_TAU_M)
++                    )
++                    ratio_gate = torch.sigmoid(
++                        draft_to_top1_ratio.sub(MGSD_V7_RHO).div(MGSD_V7_TAU_R)
++                    )
++                    safe_evidence = margin_gate * ratio_gate
++                    uncertainty = 1.0 - safe_evidence
++                    risk_weight = torch.zeros_like(tolerance)
++                    risk_weight = _apply_token_backoff(
++                        draft_token_ids,
++                        risk_weight,
++                        MGSD_NEGATION_TOKEN_IDS,
++                        MGSD_V7_WEIGHT_NEGATION,
++                    )
++                    risk_weight = _apply_token_backoff(
++                        draft_token_ids,
++                        risk_weight,
++                        MGSD_NUMERIC_TOKEN_IDS,
++                        MGSD_V7_WEIGHT_NUMERIC,
++                    )
++                    risk_weight = _apply_token_backoff(
++                        draft_token_ids,
++                        risk_weight,
++                        MGSD_UNIT_TOKEN_IDS,
++                        MGSD_V7_WEIGHT_UNIT,
++                    )
++                    risk_weight = _apply_token_backoff(
++                        draft_token_ids,
++                        risk_weight,
++                        MGSD_FREQUENCY_TOKEN_IDS,
++                        MGSD_V7_WEIGHT_FREQUENCY,
++                    )
++                    risk_weight = _apply_token_backoff(
++                        draft_token_ids,
++                        risk_weight,
++                        MGSD_MEDICATION_TOKEN_IDS,
++                        MGSD_V7_WEIGHT_MEDICATION,
++                    )
++                    risk_gate = torch.clamp(
++                        1.0 - MGSD_V7_LAMBDA * risk_weight * uncertainty,
++                        min=MGSD_V7_MIN_GATE,
++                        max=1.0,
++                    )
++                    safe_gate = MGSD_V7_SAFE_FLOOR + (
++                        1.0 - MGSD_V7_SAFE_FLOOR
++                    ) * safe_evidence
++                    gate_scale = torch.where(risk_mask, risk_gate, safe_gate)
++                    tolerance = tolerance * gate_scale
++                    risk_backoff = torch.where(
++                        risk_mask,
++                        risk_gate,
++                        torch.ones_like(risk_gate),
++                    )
++                else:
++                    margin_gate = torch.sigmoid(
+                     draft_margins.sub(MGSD_V6_DELTA_RISK).div(MGSD_V6_TAU_M_RISK)
+                 )
+                 ratio_gate = torch.sigmoid(
+@@ -957,6 +1035,7 @@ def rejection_sample(
+                     risk_backoff,
+                     torch.ones_like(risk_backoff),
+                 )
++                gate_scale = torch.where(risk_mask, risk_gate, safe_gate)
+             else:
+                 margin_gate = torch.sigmoid(
+                     draft_margins.sub(MGSD_MARGIN_DELTA).div(MGSD_SOFT_TAU)
+-- 
+2.34.1

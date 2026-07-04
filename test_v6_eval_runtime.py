@@ -2,6 +2,7 @@ import unittest
 from pathlib import Path
 
 from v6_eval_runtime import (
+  apply_method_env_overrides,
   build_method_env,
   build_risk_token_ids,
   build_run_manifest,
@@ -34,6 +35,10 @@ class V6EvalRuntimeTests(unittest.TestCase):
     with self.assertRaisesRegex(ValueError, "tensor parallel"):
       validate_gpu_config("0,1", tensor_parallel_size=4)
 
+  def test_baseline_disables_all_custom_gates(self):
+    env = build_method_env("baseline", base_tolerance=0.2, risk_token_ids={})
+    self.assertEqual(env, {})
+
   def test_v5_disables_v6_and_uses_requested_tolerance(self):
     env = build_method_env("v5", base_tolerance=0.2, risk_token_ids={})
     self.assertEqual(env["VLLM_EARS_BASE_TOLERANCE"], "0.2")
@@ -50,6 +55,69 @@ class V6EvalRuntimeTests(unittest.TestCase):
     self.assertEqual(env["VLLM_MGSD_NEGATION_TOKEN_IDS"], "1,3")
     self.assertEqual(env["VLLM_MGSD_V6_SAFE_FLOOR"], "0.75")
     self.assertEqual(env["VLLM_MGSD_V6_RHO_RISK"], "0.85")
+
+  def test_v7_risk_score_exports_balanced_defaults(self):
+    env = build_method_env(
+      "v7-risk-score",
+      base_tolerance=0.2,
+      risk_token_ids={"medication": {9}, "frequency": {7}},
+    )
+
+    self.assertEqual(env["VLLM_MGSD_V6_ENABLED"], "1")
+    self.assertEqual(env["VLLM_MGSD_V7_ENABLED"], "1")
+    self.assertEqual(env["VLLM_MGSD_V7_LAMBDA"], "0.75")
+    self.assertEqual(env["VLLM_MGSD_V7_MIN_GATE"], "0.10")
+    self.assertEqual(env["VLLM_MGSD_V7_RHO"], "0.90")
+    self.assertEqual(env["VLLM_MGSD_V7_SAFE_FLOOR"], "0.85")
+    self.assertEqual(env["VLLM_MGSD_V7_WEIGHT_NEGATION"], "1.00")
+    self.assertEqual(env["VLLM_MGSD_V7_WEIGHT_NUMERIC"], "0.80")
+    self.assertEqual(env["VLLM_MGSD_V7_WEIGHT_UNIT"], "0.60")
+    self.assertEqual(env["VLLM_MGSD_V7_WEIGHT_FREQUENCY"], "0.80")
+    self.assertEqual(env["VLLM_MGSD_V7_WEIGHT_MEDICATION"], "0.70")
+    self.assertEqual(env["VLLM_MGSD_MEDICATION_TOKEN_IDS"], "9")
+    self.assertEqual(env["VLLM_MGSD_FREQUENCY_TOKEN_IDS"], "7")
+
+  def test_applies_only_explicit_tuning_overrides(self):
+    env = build_method_env(
+      "v6-default",
+      base_tolerance=0.2,
+      risk_token_ids={"negation": {3, 1}},
+    )
+    overridden = apply_method_env_overrides(
+      env,
+      {
+        "VLLM_MGSD_ENABLED": "0",
+        "VLLM_MGSD_NEGATION_TOKEN_IDS": "999",
+        "VLLM_MGSD_FREQUENCY_BACKOFF": "0.25",
+        "VLLM_MGSD_V6_RHO_RISK": "0.90",
+      },
+    )
+
+    self.assertEqual(overridden["VLLM_MGSD_ENABLED"], "1")
+    self.assertEqual(overridden["VLLM_MGSD_NEGATION_TOKEN_IDS"], "1,3")
+    self.assertEqual(overridden["VLLM_MGSD_FREQUENCY_BACKOFF"], "0.25")
+    self.assertEqual(overridden["VLLM_MGSD_V6_RHO_RISK"], "0.90")
+
+  def test_applies_v7_tuning_overrides(self):
+    env = build_method_env(
+      "v7-risk-score",
+      base_tolerance=0.2,
+      risk_token_ids={"negation": {3, 1}},
+    )
+    overridden = apply_method_env_overrides(
+      env,
+      {
+        "VLLM_MGSD_V7_LAMBDA": "0.60",
+        "VLLM_MGSD_V7_WEIGHT_MEDICATION": "0.90",
+        "VLLM_MGSD_V7_RHO": "0.95",
+        "VLLM_MGSD_V7_ENABLED": "0",
+      },
+    )
+
+    self.assertEqual(overridden["VLLM_MGSD_V7_ENABLED"], "1")
+    self.assertEqual(overridden["VLLM_MGSD_V7_LAMBDA"], "0.60")
+    self.assertEqual(overridden["VLLM_MGSD_V7_WEIGHT_MEDICATION"], "0.90")
+    self.assertEqual(overridden["VLLM_MGSD_V7_RHO"], "0.95")
 
   def test_builds_stable_risk_ids_and_skips_multi_token_medications(self):
     class FakeTokenizer:
